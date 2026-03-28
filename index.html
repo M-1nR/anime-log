@@ -819,10 +819,10 @@ function App() {
     const rated = visible.filter(x => x.rating !== "");
     if (rated.length === 0) { showToast("評価済みの作品がありません", "err"); return; }
     setShowExportMenu(false);
-    showToast("Tier表を生成中…", "info", 60000);
+    showToast(`Tier表を生成中… (${rated.length}件)`, "info", 120000);
 
-    const THUMB = 80;        // サムネイル正方形サイズ
-    const ROW_LABEL_W = 56;  // 左のTierラベル幅
+    const THUMB = 80;
+    const ROW_LABEL_W = 56;
     const PAD = 16, GAP = 6;
     const RATING_COLORS = {
       "S+":{ bg:"#f5c842", text:"#111" },
@@ -834,26 +834,34 @@ function App() {
       "D" :{ bg:"#888",    text:"#ccc" },
     };
 
-    // 評価済みのみ対象
-    const loadImgTier = async (item) => {
+    // ── Step1: 全作品の画像を並列取得（同時に最大6件） ──
+    const fetchOne = async (item) => {
       if (!anilistCache[item.id]) {
-        const url = await fetchAniListImage(item.title);
-        anilistCache[item.id] = url;
+        anilistCache[item.id] = await fetchAniListImage(item.title);
       }
       const aniUrl = anilistCache[item.id];
       if (aniUrl) {
         const img = await loadImgFromUrl(aniUrl);
-        if (img) return img;
+        if (img) return [item.id, img];
       }
-      if (item.image) return await loadImgFromUrl(item.image);
-      return null;
+      if (item.image) {
+        const img = await loadImgFromUrl(item.image);
+        if (img) return [item.id, img];
+      }
+      return [item.id, null];
     };
 
-    // 各Tierの作品リスト
-    const tiers = RATINGS.filter(r => rated.some(x => x.rating === r.id));
-    if (tiers.length === 0) { showToast("評価済みの作品がありません", "err"); return; }
+    // 並列数を6に制限してフェッチ
+    const imgMap = {};
+    const PARALLEL = 6;
+    for (let i = 0; i < rated.length; i += PARALLEL) {
+      const chunk = rated.slice(i, i + PARALLEL);
+      const results = await Promise.all(chunk.map(fetchOne));
+      results.forEach(([id, img]) => { imgMap[id] = img; });
+    }
 
-    // 行ごとの高さを計算（サムネ数によって複数行になる場合あり）
+    // ── Step2: レイアウト計算 ──
+    const tiers = RATINGS.filter(r => rated.some(x => x.rating === r.id));
     const CANVAS_W = 900;
     const INNER_W = CANVAS_W - PAD * 2 - ROW_LABEL_W - GAP;
     const THUMBS_PER_ROW = Math.floor((INNER_W + GAP) / (THUMB + GAP));
@@ -861,7 +869,7 @@ function App() {
     const tierRows = tiers.map(r => {
       const items = rated.filter(x => x.rating === r.id);
       const rowCount = Math.ceil(items.length / THUMBS_PER_ROW);
-      const rowH = Math.max(THUMB, rowCount * THUMB + (rowCount - 1) * GAP);
+      const rowH = Math.max(THUMB + 12, rowCount * (THUMB + GAP) - GAP + 12);
       return { ...r, items, rowH };
     });
 
@@ -870,7 +878,7 @@ function App() {
     canvas.width = CANVAS_W; canvas.height = totalH;
     const ctx = canvas.getContext("2d");
 
-    // 背景
+    // ── Step3: 描画 ──
     ctx.fillStyle = "#f4f5f7";
     ctx.fillRect(0, 0, CANVAS_W, totalH);
 
@@ -879,13 +887,11 @@ function App() {
       const rowH = tier.rowH + PAD;
       const rc = RATING_COLORS[tier.id];
 
-      // Tierラベル背景
       ctx.fillStyle = rc.bg;
       ctx.beginPath();
       ctx.roundRect(PAD, curY, ROW_LABEL_W, tier.rowH, 8);
       ctx.fill();
 
-      // Tierラベル文字
       ctx.fillStyle = rc.text;
       ctx.font = `bold ${tier.id.length > 1 ? 22 : 26}px 'Helvetica Neue', Arial, sans-serif`;
       ctx.textAlign = "center";
@@ -894,7 +900,6 @@ function App() {
       ctx.textAlign = "left";
       ctx.textBaseline = "alphabetic";
 
-      // サムネイル行背景
       ctx.fillStyle = "#ffffff";
       ctx.beginPath();
       ctx.roundRect(PAD + ROW_LABEL_W + GAP, curY, INNER_W, tier.rowH, 8);
@@ -905,15 +910,14 @@ function App() {
       ctx.roundRect(PAD + ROW_LABEL_W + GAP, curY, INNER_W, tier.rowH, 8);
       ctx.stroke();
 
-      // サムネイル描画
       for (let i = 0; i < tier.items.length; i++) {
         const item = tier.items[i];
         const col = i % THUMBS_PER_ROW;
         const row = Math.floor(i / THUMBS_PER_ROW);
         const tx = PAD + ROW_LABEL_W + GAP + 6 + col * (THUMB + GAP);
         const ty = curY + 6 + row * (THUMB + GAP);
+        const img = imgMap[item.id];
 
-        const img = await loadImgTier(item);
         if (img) {
           ctx.save();
           ctx.beginPath();
@@ -939,7 +943,6 @@ function App() {
           ctx.textBaseline = "alphabetic";
         }
       }
-
       curY += rowH;
     }
 

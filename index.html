@@ -138,7 +138,11 @@ function buildSeasons() {
   let year = 2026, si = 3;
   for (let i = 0; i < 12; i++) {
     list.push({ value:`${year}-${en[si]}`, label:`${year}年 ${ja[si]}クール` });
-    si--; if (si < 0) { si = 3; year--; }
+    // 冬(3)→秋(2)の切り替えが年をまたぐ境界（2026冬→2025秋）
+    const prevSi = si;
+    si--;
+    if (si < 0) { si = 3; }
+    if (prevSi === 3) { year--; }
   }
   return list;
 }
@@ -178,11 +182,11 @@ function pickRestImage(images) {
          images.twitter?.normal_avatar_url || null;
 }
 
-// シーズン作品 + 視聴済みを一括取得
+// シーズン作品 + 視聴済みを一括取得（libraryEntriesにもseasonフィルターを適用）
 const Q_SEASON_WITH_LIB = `
 query($season:String!){
   viewer{
-    libraryEntries(states:[WATCHING, WATCHED],first:200){
+    libraryEntries(states:[WATCHING, WATCHED], seasons:[$season], first:200){
       nodes{ work{ annictId } }
     }
   }
@@ -352,10 +356,15 @@ function App() {
     setLoading(true);
     try {
       const d = await gqlFetch(tok, Q_SEASON_WITH_LIB, { season: s });
-      const watchedIds = new Set(
+      // libraryEntriesのID一覧（seasonsフィルターが効かない場合も考慮）
+      const libIds = new Set(
         (d.viewer?.libraryEntries?.nodes ?? []).map(n => String(n.work.annictId))
       );
       const nodes = d?.searchWorks?.nodes ?? [];
+      // searchWorksで返ってきた作品IDセット
+      const seasonWorkIds = new Set(nodes.map(w => String(w.annictId)));
+      // 両方に含まれるIDだけを視聴済みとする
+      const watchedIds = new Set([...libIds].filter(id => seasonWorkIds.has(id)));
       const saved = loadSaved();
       const fresh = {};
       nodes.forEach(w => {

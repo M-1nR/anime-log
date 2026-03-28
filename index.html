@@ -325,10 +325,13 @@ function mergeSaved(items, saved) {
   return next;
 }
 function extractSaveable(items) {
+  const existing = loadSaved();
   const out = {};
   for (const id in items) {
     const { rating, comment } = items[id];
-    if (rating || comment) out[id] = { rating, comment };
+    // 評価・感想がある場合、または以前に保存されていた場合は必ず書き込む
+    // （以前に保存されていたものを未評価に戻した場合も正しく反映するため）
+    if (rating || comment || existing[id]) out[id] = { rating, comment };
   }
   return out;
 }

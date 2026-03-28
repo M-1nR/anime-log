@@ -450,42 +450,33 @@ function App() {
     showToast("JSONをエクスポートしました", "ok");
   };
 
-  // ── 画像出力 ────────────────────────────────────────────────────────────
+  // ── 画像出力（複数ページ対応・感想メモ付き） ────────────────────────────
   const exportImage = async () => {
     if (visible.length === 0) { showToast("表示中の作品がありません", "err"); return; }
-    showToast("画像を生成中…", "info", 10000);
+    showToast("画像を生成中…", "info", 30000);
 
-    const CARD_W = 110, CARD_H = 160, POSTER_H = 110;
-    const COLS = Math.min(8, visible.length);
-    const ROWS = Math.ceil(visible.length / COLS);
-    const PAD = 16, GAP = 8;
-    const HEADER_H = 64;
+    // カードサイズ定義
+    const POSTER_W  = 130;
+    const POSTER_H  = 180;
+    const TITLE_H   = 36;   // タイトル2行分
+    const RATING_H  = 28;   // 評価バッジ行
+    const COMMENT_H = 72;   // 感想3行分
+    const CARD_W = POSTER_W;
+    const CARD_H = POSTER_H + TITLE_H + RATING_H + COMMENT_H;
+    const COLS = 5;
+    const ROWS_PER_PAGE = 4;
+    const CARDS_PER_PAGE = COLS * ROWS_PER_PAGE;
+    const PAD = 24, GAP = 12;
+    const HEADER_H = 72;
+    const FOOTER_H = 32;
     const CW = PAD * 2 + COLS * CARD_W + (COLS - 1) * GAP;
-    const CH = HEADER_H + PAD + ROWS * CARD_H + (ROWS - 1) * GAP + PAD;
+    const CH = HEADER_H + PAD + ROWS_PER_PAGE * CARD_H + (ROWS_PER_PAGE - 1) * GAP + PAD + FOOTER_H;
 
-    const canvas = document.createElement("canvas");
-    canvas.width = CW; canvas.height = CH;
-    const ctx = canvas.getContext("2d");
-
-    // 背景
-    ctx.fillStyle = "#0d0d0f";
-    ctx.fillRect(0, 0, CW, CH);
-
-    // ヘッダー
-    ctx.fillStyle = "#f5c842";
-    ctx.font = "bold 28px 'Helvetica Neue', Arial, sans-serif";
-    ctx.fillText("ANIME LOG", PAD, 40);
-    const selLabel = SEASONS.find(s => s.value === season)?.label ?? season;
-    ctx.fillStyle = "#666";
-    ctx.font = "14px 'Helvetica Neue', Arial, sans-serif";
-    ctx.fillText(selLabel, PAD, 58);
-
-    // 各カードを描画
     const RATING_MAP = {
       "S+":{ bg:"#f5c842", text:"#111" }, "S":{ bg:"#f59342", text:"#fff" },
       "A+":{ bg:"#e05a7a", text:"#fff" }, "A":{ bg:"#c06ab0", text:"#fff" },
-      "B":{ bg:"#6ab0e0",  text:"#fff" }, "C":{ bg:"#60b880", text:"#fff" },
-      "D":{ bg:"#555",     text:"#ccc" }
+      "B" :{ bg:"#6ab0e0", text:"#fff" }, "C":{ bg:"#60b880", text:"#fff" },
+      "D" :{ bg:"#555555", text:"#ccc" }
     };
 
     const loadImg = (src) => new Promise(res => {
@@ -496,99 +487,185 @@ function App() {
       img.src = src;
     });
 
-    for (let i = 0; i < visible.length; i++) {
-      const item = visible[i];
-      const col = i % COLS;
-      const row = Math.floor(i / COLS);
-      const x = PAD + col * (CARD_W + GAP);
-      const y = HEADER_H + PAD + row * (CARD_H + GAP);
+    const drawRoundRect = (ctx, x, y, w, h, r, fill, stroke) => {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.lineTo(x + w - r, y);
+      ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+      ctx.lineTo(x + w, y + h - r);
+      ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+      ctx.lineTo(x + r, y + h);
+      ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+      ctx.lineTo(x, y + r);
+      ctx.quadraticCurveTo(x, y, x + r, y);
+      ctx.closePath();
+      if (fill)   { ctx.fillStyle = fill;     ctx.fill(); }
+      if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 1; ctx.stroke(); }
+    };
 
-      // カード背景
-      ctx.fillStyle = "#141418";
-      roundRect(ctx, x, y, CARD_W, CARD_H, 8);
-      ctx.fill();
-
-      // ポスター画像
-      if (item.image) {
-        const img = await loadImg(item.image);
-        if (img) {
-          ctx.save();
-          roundRect(ctx, x, y, CARD_W, POSTER_H, 8);
-          ctx.clip();
-          // アスペクト維持でセンタークロップ
-          const iAR = img.width / img.height;
-          const cAR = CARD_W / POSTER_H;
-          let sw, sh, sx, sy;
-          if (iAR > cAR) { sh = img.height; sw = sh * cAR; sx = (img.width - sw) / 2; sy = 0; }
-          else            { sw = img.width;  sh = sw / cAR; sy = (img.height - sh) / 2; sx = 0; }
-          ctx.drawImage(img, sx, sy, sw, sh, x, y, CARD_W, POSTER_H);
-          ctx.restore();
-        } else {
-          ctx.fillStyle = "#1a1a2e";
-          ctx.fillRect(x, y, CARD_W, POSTER_H);
-        }
-      } else {
-        ctx.fillStyle = "#1a1a2e";
-        ctx.fillRect(x, y, CARD_W, POSTER_H);
+    const wrapLines = (ctx, text, maxW, maxLines) => {
+      const lines = [];
+      let cur = "";
+      for (const ch of text) {
+        const test = cur + ch;
+        if (ctx.measureText(test).width > maxW && cur.length > 0) {
+          lines.push(cur); cur = ch;
+          if (lines.length >= maxLines) break;
+        } else { cur = test; }
       }
+      if (cur && lines.length < maxLines) lines.push(cur);
+      return lines;
+    };
 
-      // タイトル
-      ctx.fillStyle = "#e8e4dc";
-      ctx.font = "bold 10px 'Helvetica Neue', Arial, sans-serif";
-      const lines = wrapText(ctx, item.title, CARD_W - 8);
-      lines.slice(0, 2).forEach((line, li) => {
-        ctx.fillText(line, x + 4, y + POSTER_H + 12 + li * 13, CARD_W - 8);
-      });
+    const totalPages = Math.ceil(visible.length / CARDS_PER_PAGE);
+    const selLabel   = SEASONS.find(s => s.value === season)?.label ?? season;
 
-      // 評価バッジ
-      if (item.rating && RATING_MAP[item.rating]) {
-        const rc = RATING_MAP[item.rating];
-        const BW = 28, BH = 20, BX = x + CARD_W - BW - 4, BY = y + 4;
-        ctx.fillStyle = rc.bg;
-        roundRect(ctx, BX, BY, BW, BH, 5);
-        ctx.fill();
-        ctx.fillStyle = rc.text;
-        ctx.font = "bold 11px 'Helvetica Neue', Arial, sans-serif";
-        ctx.textAlign = "center";
-        ctx.fillText(item.rating, BX + BW / 2, BY + 14);
+    for (let page = 0; page < totalPages; page++) {
+      const pageItems = visible.slice(page * CARDS_PER_PAGE, (page + 1) * CARDS_PER_PAGE);
+      const rows = Math.ceil(pageItems.length / COLS);
+      const canvasH = HEADER_H + PAD + rows * CARD_H + (rows - 1) * GAP + PAD + FOOTER_H;
+
+      const canvas = document.createElement("canvas");
+      canvas.width  = CW;
+      canvas.height = canvasH;
+      const ctx = canvas.getContext("2d");
+
+      // 背景
+      ctx.fillStyle = "#0d0d0f";
+      ctx.fillRect(0, 0, CW, canvasH);
+
+      // 上部ライン装飾
+      const grad = ctx.createLinearGradient(0, 0, CW, 0);
+      grad.addColorStop(0, "#f5c842");
+      grad.addColorStop(1, "#e05a7a");
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, CW, 3);
+
+      // ヘッダー
+      ctx.fillStyle = "#f5c842";
+      ctx.font = "bold 32px 'Helvetica Neue', Arial, sans-serif";
+      ctx.fillText("ANIME LOG", PAD, 44);
+      ctx.fillStyle = "#888";
+      ctx.font = "15px 'Helvetica Neue', Arial, sans-serif";
+      ctx.fillText(selLabel, PAD, 64);
+      if (totalPages > 1) {
+        ctx.textAlign = "right";
+        ctx.fillStyle = "#555";
+        ctx.font = "13px 'Helvetica Neue', Arial, sans-serif";
+        ctx.fillText(`${page + 1} / ${totalPages}`, CW - PAD, 64);
         ctx.textAlign = "left";
       }
+
+      // カード描画
+      for (let i = 0; i < pageItems.length; i++) {
+        const item = pageItems[i];
+        const col  = i % COLS;
+        const row  = Math.floor(i / COLS);
+        const cx   = PAD + col * (CARD_W + GAP);
+        const cy   = HEADER_H + PAD + row * (CARD_H + GAP);
+
+        // カード背景
+        drawRoundRect(ctx, cx, cy, CARD_W, CARD_H, 8, "#141418", "rgba(255,255,255,0.07)");
+
+        // ── ポスター ──
+        const posterY = cy;
+        if (item.image) {
+          const img = await loadImg(item.image);
+          if (img) {
+            ctx.save();
+            drawRoundRect(ctx, cx, posterY, POSTER_W, POSTER_H, 8, null, null);
+            ctx.clip();
+            const iAR = img.width / img.height;
+            const cAR = POSTER_W / POSTER_H;
+            let sw, sh, sx, sy;
+            if (iAR > cAR) { sh = img.height; sw = sh * cAR; sx = (img.width - sw) / 2; sy = 0; }
+            else            { sw = img.width;  sh = sw / cAR; sy = (img.height - sh) / 2; sx = 0; }
+            ctx.drawImage(img, sx, sy, sw, sh, cx, posterY, POSTER_W, POSTER_H);
+            ctx.restore();
+          } else {
+            drawRoundRect(ctx, cx, posterY, POSTER_W, POSTER_H, 8, "#1a1a2e", null);
+            ctx.fillStyle = "#333";
+            ctx.font = "28px Arial";
+            ctx.textAlign = "center";
+            ctx.fillText("🎞️", cx + POSTER_W / 2, posterY + POSTER_H / 2 + 10);
+            ctx.textAlign = "left";
+          }
+        } else {
+          drawRoundRect(ctx, cx, posterY, POSTER_W, POSTER_H, 8, "#1a1a2e", null);
+          ctx.fillStyle = "#333";
+          ctx.font = "28px Arial";
+          ctx.textAlign = "center";
+          ctx.fillText("🎞️", cx + POSTER_W / 2, posterY + POSTER_H / 2 + 10);
+          ctx.textAlign = "left";
+        }
+
+        // 評価バッジ（ポスター右上オーバーレイ）
+        if (item.rating && RATING_MAP[item.rating]) {
+          const rc = RATING_MAP[item.rating];
+          const BW = 34, BH = 22;
+          const BX = cx + POSTER_W - BW - 5, BY = posterY + 5;
+          drawRoundRect(ctx, BX, BY, BW, BH, 5, rc.bg, null);
+          ctx.fillStyle = rc.text;
+          ctx.font = "bold 12px 'Helvetica Neue', Arial, sans-serif";
+          ctx.textAlign = "center";
+          ctx.fillText(item.rating, BX + BW / 2, BY + 15);
+          ctx.textAlign = "left";
+        }
+
+        // ── タイトル ──
+        const titleY = cy + POSTER_H + 4;
+        ctx.fillStyle = "#f0ecdc";
+        ctx.font = "bold 11px 'Helvetica Neue', Arial, sans-serif";
+        const titleLines = wrapLines(ctx, item.title, CARD_W - 8, 2);
+        titleLines.forEach((line, li) => {
+          ctx.fillText(line, cx + 4, titleY + 12 + li * 14, CARD_W - 8);
+        });
+
+        // ── 区切り線 ──
+        const divY = cy + POSTER_H + TITLE_H + 4;
+        ctx.strokeStyle = "rgba(255,255,255,0.07)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(cx + 4, divY);
+        ctx.lineTo(cx + CARD_W - 4, divY);
+        ctx.stroke();
+
+        // ── 感想メモ ──
+        const commentY = divY + 4;
+        if (item.comment && item.comment.trim()) {
+          ctx.fillStyle = "#888";
+          ctx.font = "10px 'Helvetica Neue', Arial, sans-serif";
+          const commentLines = wrapLines(ctx, item.comment.trim(), CARD_W - 10, 4);
+          commentLines.forEach((line, li) => {
+            ctx.fillText(line, cx + 5, commentY + 11 + li * 13, CARD_W - 10);
+          });
+        } else {
+          ctx.fillStyle = "#333";
+          ctx.font = "10px 'Helvetica Neue', Arial, sans-serif";
+          ctx.fillText("—", cx + 5, commentY + 11);
+        }
+      }
+
+      // フッター
+      ctx.fillStyle = "#333";
+      ctx.font = "11px 'Helvetica Neue', Arial, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText("generated by ANIME LOG", CW / 2, canvasH - 12);
+      ctx.textAlign = "left";
+
+      // ダウンロード
+      const suffix = totalPages > 1 ? `_${page + 1}of${totalPages}` : "";
+      const a = document.createElement("a");
+      a.download = `animelog_${season}${suffix}.png`;
+      a.href = canvas.toDataURL("image/png");
+      a.click();
+      await new Promise(r => setTimeout(r, 300));
     }
 
-    // ダウンロード
-    const a = document.createElement("a");
-    a.download = `animelog_${season}.png`;
-    a.href = canvas.toDataURL("image/png");
-    a.click();
-    showToast("画像を保存しました", "ok");
+    showToast(totalPages > 1 ? `${totalPages}枚の画像を保存しました` : "画像を保存しました", "ok");
   };
 
-  function roundRect(ctx, x, y, w, h, r) {
-    ctx.beginPath();
-    ctx.moveTo(x + r, y);
-    ctx.lineTo(x + w - r, y);
-    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-    ctx.lineTo(x + w, y + h - r);
-    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-    ctx.lineTo(x + r, y + h);
-    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-    ctx.lineTo(x, y + r);
-    ctx.quadraticCurveTo(x, y, x + r, y);
-    ctx.closePath();
-  }
 
-  function wrapText(ctx, text, maxW) {
-    const lines = [];
-    let cur = "";
-    for (const ch of text) {
-      const test = cur + ch;
-      if (ctx.measureText(test).width > maxW && cur.length > 0) {
-        lines.push(cur); cur = ch;
-      } else { cur = test; }
-    }
-    if (cur) lines.push(cur);
-    return lines;
-  }
 
   const doImport = () => {
     try {

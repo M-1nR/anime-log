@@ -158,11 +158,31 @@ async function gqlFetch(token, query, vars = {}) {
 
 const Q_ME = `query{ viewer{ name avatarUrl } }`;
 
+// REST API ヘルパー (画像取得用)
+async function restFetch(token, endpoint, params = {}) {
+  const url = new URL(`https://api.annict.com/v1/${endpoint}`);
+  Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, String(v)));
+  const r = await fetch(url.toString(), {
+    headers: { "Authorization": `Bearer ${token}` }
+  });
+  if (!r.ok) throw new Error(`REST HTTP ${r.status}`);
+  return r.json();
+}
+
+function pickRestImage(images) {
+  if (!images) return null;
+  return images.recommended_url ||
+         images.facebook?.og_image_url ||
+         images.twitter?.original_avatar_url ||
+         images.twitter?.bigger_avatar_url ||
+         images.twitter?.normal_avatar_url || null;
+}
+
 // シーズン作品 + 視聴済みを一括取得
 const Q_SEASON_WITH_LIB = `
 query($season:String!){
   viewer{
-    libraryEntries(states:[WATCHED],first:200){
+    libraryEntries(states:[WATCHING, WATCHED],first:200){
       nodes{ work{ annictId } }
     }
   }
@@ -341,6 +361,27 @@ function App() {
       nodes.forEach(w => {
         fresh[String(w.annictId)] = workToItem(w, watchedIds.has(String(w.annictId)));
       });
+
+      // 画像がない作品をREST APIで補完
+      const noImageIds = Object.values(fresh)
+        .filter(x => !x.image)
+        .map(x => x.id);
+      if (noImageIds.length > 0) {
+        try {
+          const restData = await restFetch(tok, "works", {
+            filter_ids: noImageIds.join(","),
+            fields: "id,images",
+            per_page: 50,
+          });
+          (restData.works ?? []).forEach(w => {
+            const id = String(w.id);
+            if (fresh[id] && !fresh[id].image) {
+              fresh[id] = { ...fresh[id], image: pickRestImage(w.images) };
+            }
+          });
+        } catch (_) { /* 画像補完失敗は無視 */ }
+      }
+
       setItems(mergeSaved(fresh, saved));
       showToast(`${nodes.length} 件読み込みました`, "ok");
     } catch (e) { showToast(e.message, "err"); }

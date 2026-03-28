@@ -198,15 +198,16 @@ function loadSaved() {
 function mergeSaved(items, saved) {
   const next = {};
   for (const id in items) {
-    next[id] = { ...items[id], ...(saved[id] ? { rating: saved[id].rating ?? "", comment: saved[id].comment ?? "", watched: saved[id].watched ?? false } : {}) };
+    // watched はAnnictのAPIから取得するためlocalStorageで上書きしない
+    next[id] = { ...items[id], ...(saved[id] ? { rating: saved[id].rating ?? "", comment: saved[id].comment ?? "" } : {}) };
   }
   return next;
 }
 function extractSaveable(items) {
   const out = {};
   for (const id in items) {
-    const { rating, comment, watched } = items[id];
-    if (rating || comment || watched) out[id] = { rating, comment, watched };
+    const { rating, comment } = items[id];
+    if (rating || comment) out[id] = { rating, comment };
   }
   return out;
 }

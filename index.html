@@ -455,18 +455,16 @@ function App() {
     if (visible.length === 0) { showToast("表示中の作品がありません", "err"); return; }
     showToast("画像を生成中…", "info", 30000);
 
-    // カードサイズ定義
-    const POSTER_W  = 130;
-    const POSTER_H  = 180;
-    const TITLE_H   = 36;   // タイトル2行分
-    const RATING_H  = 28;   // 評価バッジ行
-    const COMMENT_H = 72;   // 感想3行分
-    const CARD_W = POSTER_W;
-    const CARD_H = POSTER_H + TITLE_H + RATING_H + COMMENT_H;
-    const COLS = 5;
-    const ROWS_PER_PAGE = 4;
+    // カードサイズ定義（横長カード: 左ポスター + 右情報）
+    const POSTER_W  = 120;
+    const POSTER_H  = 170;
+    const INFO_W    = 290;
+    const CARD_W    = POSTER_W + INFO_W;
+    const CARD_H    = POSTER_H;
+    const COLS = 2;
+    const ROWS_PER_PAGE = 6;
     const CARDS_PER_PAGE = COLS * ROWS_PER_PAGE;
-    const PAD = 24, GAP = 12;
+    const PAD = 24, GAP = 14;
     const HEADER_H = 72;
     const FOOTER_H = 32;
     const CW = PAD * 2 + COLS * CARD_W + (COLS - 1) * GAP;
@@ -479,13 +477,23 @@ function App() {
       "D" :{ bg:"#555555", text:"#ccc" }
     };
 
-    const loadImg = (src) => new Promise(res => {
-      const img = new Image();
-      img.crossOrigin = "anonymous";
-      img.onload  = () => res(img);
-      img.onerror = () => res(null);
-      img.src = src;
-    });
+    const loadImg = async (src) => {
+      if (!src) return null;
+      try {
+        const resp = await fetch(src);
+        if (!resp.ok) throw new Error();
+        const blob = await resp.blob();
+        const url  = URL.createObjectURL(blob);
+        return await new Promise(res => {
+          const img = new Image();
+          img.onload  = () => { URL.revokeObjectURL(url); res(img); };
+          img.onerror = () => { URL.revokeObjectURL(url); res(null); };
+          img.src = url;
+        });
+      } catch {
+        return null;
+      }
+    };
 
     const drawRoundRect = (ctx, x, y, w, h, r, fill, stroke) => {
       ctx.beginPath();
@@ -564,85 +572,103 @@ function App() {
         const cx   = PAD + col * (CARD_W + GAP);
         const cy   = HEADER_H + PAD + row * (CARD_H + GAP);
 
-        // カード背景
-        drawRoundRect(ctx, cx, cy, CARD_W, CARD_H, 8, "#141418", "rgba(255,255,255,0.07)");
+        // ── カード背景 ──
+        drawRoundRect(ctx, cx, cy, CARD_W, CARD_H, 8, "#141418", "rgba(255,255,255,0.08)");
 
-        // ── ポスター ──
-        const posterY = cy;
-        if (item.image) {
-          const img = await loadImg(item.image);
-          if (img) {
-            ctx.save();
-            drawRoundRect(ctx, cx, posterY, POSTER_W, POSTER_H, 8, null, null);
-            ctx.clip();
-            const iAR = img.width / img.height;
-            const cAR = POSTER_W / POSTER_H;
-            let sw, sh, sx, sy;
-            if (iAR > cAR) { sh = img.height; sw = sh * cAR; sx = (img.width - sw) / 2; sy = 0; }
-            else            { sw = img.width;  sh = sw / cAR; sy = (img.height - sh) / 2; sx = 0; }
-            ctx.drawImage(img, sx, sy, sw, sh, cx, posterY, POSTER_W, POSTER_H);
-            ctx.restore();
-          } else {
-            drawRoundRect(ctx, cx, posterY, POSTER_W, POSTER_H, 8, "#1a1a2e", null);
-            ctx.fillStyle = "#333";
-            ctx.font = "28px Arial";
-            ctx.textAlign = "center";
-            ctx.fillText("🎞️", cx + POSTER_W / 2, posterY + POSTER_H / 2 + 10);
-            ctx.textAlign = "left";
-          }
+        // ── 左: ポスター画像 ──
+        const img = await loadImg(item.image);
+        if (img) {
+          ctx.save();
+          // 左側だけ角丸クリップ
+          ctx.beginPath();
+          ctx.moveTo(cx + 8, cy);
+          ctx.lineTo(cx + POSTER_W, cy);
+          ctx.lineTo(cx + POSTER_W, cy + POSTER_H);
+          ctx.lineTo(cx + 8, cy + POSTER_H);
+          ctx.quadraticCurveTo(cx, cy + POSTER_H, cx, cy + POSTER_H - 8);
+          ctx.lineTo(cx, cy + 8);
+          ctx.quadraticCurveTo(cx, cy, cx + 8, cy);
+          ctx.closePath();
+          ctx.clip();
+          const iAR = img.width / img.height;
+          const cAR = POSTER_W / POSTER_H;
+          let sw, sh, sx, sy;
+          if (iAR > cAR) { sh = img.height; sw = sh * cAR; sx = (img.width - sw) / 2; sy = 0; }
+          else            { sw = img.width;  sh = sw / cAR; sy = (img.height - sh) / 2; sx = 0; }
+          ctx.drawImage(img, sx, sy, sw, sh, cx, cy, POSTER_W, POSTER_H);
+          ctx.restore();
         } else {
-          drawRoundRect(ctx, cx, posterY, POSTER_W, POSTER_H, 8, "#1a1a2e", null);
-          ctx.fillStyle = "#333";
-          ctx.font = "28px Arial";
-          ctx.textAlign = "center";
-          ctx.fillText("🎞️", cx + POSTER_W / 2, posterY + POSTER_H / 2 + 10);
+          // プレースホルダー
+          ctx.fillStyle = "#1c1c28";
+          ctx.beginPath();
+          ctx.moveTo(cx + 8, cy); ctx.lineTo(cx + POSTER_W, cy);
+          ctx.lineTo(cx + POSTER_W, cy + POSTER_H); ctx.lineTo(cx + 8, cy + POSTER_H);
+          ctx.quadraticCurveTo(cx, cy + POSTER_H, cx, cy + POSTER_H - 8);
+          ctx.lineTo(cx, cy + 8); ctx.quadraticCurveTo(cx, cy, cx + 8, cy);
+          ctx.closePath(); ctx.fill();
+          ctx.fillStyle = "#2a2a3e";
+          ctx.font = "30px Arial"; ctx.textAlign = "center";
+          ctx.fillText("🎞️", cx + POSTER_W / 2, cy + POSTER_H / 2 + 12);
           ctx.textAlign = "left";
         }
 
-        // 評価バッジ（ポスター右上オーバーレイ）
-        if (item.rating && RATING_MAP[item.rating]) {
-          const rc = RATING_MAP[item.rating];
-          const BW = 34, BH = 22;
-          const BX = cx + POSTER_W - BW - 5, BY = posterY + 5;
-          drawRoundRect(ctx, BX, BY, BW, BH, 5, rc.bg, null);
-          ctx.fillStyle = rc.text;
-          ctx.font = "bold 12px 'Helvetica Neue', Arial, sans-serif";
-          ctx.textAlign = "center";
-          ctx.fillText(item.rating, BX + BW / 2, BY + 15);
-          ctx.textAlign = "left";
-        }
+        // ── ポスターと情報エリアの縦区切り ──
+        ctx.strokeStyle = "rgba(255,255,255,0.06)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(cx + POSTER_W, cy + 8);
+        ctx.lineTo(cx + POSTER_W, cy + POSTER_H - 8);
+        ctx.stroke();
 
-        // ── タイトル ──
-        const titleY = cy + POSTER_H + 4;
+        // ── 右: 情報エリア ──
+        const ix = cx + POSTER_W + 12;
+        const iw = INFO_W - 16;
+
+        // シーズン
+        ctx.fillStyle = "#555";
+        ctx.font = "11px 'Helvetica Neue', Arial, sans-serif";
+        ctx.fillText(item.season || "", ix, cy + 16, iw);
+
+        // タイトル
         ctx.fillStyle = "#f0ecdc";
-        ctx.font = "bold 11px 'Helvetica Neue', Arial, sans-serif";
-        const titleLines = wrapLines(ctx, item.title, CARD_W - 8, 2);
+        ctx.font = "bold 14px 'Helvetica Neue', Arial, sans-serif";
+        const titleLines = wrapLines(ctx, item.title, iw, 2);
         titleLines.forEach((line, li) => {
-          ctx.fillText(line, cx + 4, titleY + 12 + li * 14, CARD_W - 8);
+          ctx.fillText(line, ix, cy + 34 + li * 18, iw);
         });
 
-        // ── 区切り線 ──
-        const divY = cy + POSTER_H + TITLE_H + 4;
+        // 評価バッジ
+        if (item.rating && RATING_MAP[item.rating]) {
+          const rc = RATING_MAP[item.rating];
+          const BW = 40, BH = 24, BY = cy + 74;
+          drawRoundRect(ctx, ix, BY, BW, BH, 5, rc.bg, null);
+          ctx.fillStyle = rc.text;
+          ctx.font = "bold 13px 'Helvetica Neue', Arial, sans-serif";
+          ctx.textAlign = "center";
+          ctx.fillText(item.rating, ix + BW / 2, BY + 16);
+          ctx.textAlign = "left";
+        }
+
+        // 区切り線
         ctx.strokeStyle = "rgba(255,255,255,0.07)";
         ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.moveTo(cx + 4, divY);
-        ctx.lineTo(cx + CARD_W - 4, divY);
+        ctx.moveTo(ix, cy + 106);
+        ctx.lineTo(cx + CARD_W - 8, cy + 106);
         ctx.stroke();
 
-        // ── 感想メモ ──
-        const commentY = divY + 4;
+        // 感想メモ
         if (item.comment && item.comment.trim()) {
-          ctx.fillStyle = "#888";
-          ctx.font = "10px 'Helvetica Neue', Arial, sans-serif";
-          const commentLines = wrapLines(ctx, item.comment.trim(), CARD_W - 10, 4);
+          ctx.fillStyle = "#999";
+          ctx.font = "11px 'Helvetica Neue', Arial, sans-serif";
+          const commentLines = wrapLines(ctx, item.comment.trim(), iw, 4);
           commentLines.forEach((line, li) => {
-            ctx.fillText(line, cx + 5, commentY + 11 + li * 13, CARD_W - 10);
+            ctx.fillText(line, ix, cy + 122 + li * 14, iw);
           });
         } else {
-          ctx.fillStyle = "#333";
-          ctx.font = "10px 'Helvetica Neue', Arial, sans-serif";
-          ctx.fillText("—", cx + 5, commentY + 11);
+          ctx.fillStyle = "#3a3a42";
+          ctx.font = "11px 'Helvetica Neue', Arial, sans-serif";
+          ctx.fillText("（感想なし）", ix, cy + 122, iw);
         }
       }
 

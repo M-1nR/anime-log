@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>ANIME LOG</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/htm/3.1.1/htm.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@400;700&family=Noto+Sans+JP:wght@400;500;700&family=Bebas+Neue&display=swap" rel="stylesheet"/>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+:root{
+  --bg:#0d0d0f;--surface:#141418;--surface2:#1c1c22;
+  --border:rgba(255,255,255,0.07);--text:#e8e4dc;--muted:#666;--gold:#f5c842;
+}
+body{background:var(--bg);color:var(--text);font-family:'Noto Sans JP',sans-serif;min-height:100vh;}
+input,textarea,select,button{font-family:'Noto Sans JP',sans-serif;}
+.wrap{max-width:1080px;margin:0 auto;padding:28px 16px 80px;}
+.masthead{border-bottom:1px solid var(--border);margin-bottom:28px;padding-bottom:18px;display:flex;align-items:flex-end;gap:16px;justify-content:space-between;flex-wrap:wrap;}
+.masthead-logo{font-family:'Bebas Neue',sans-serif;font-size:38px;letter-spacing:2px;line-height:1;background:linear-gradient(135deg,var(--gold),#e05a7a);-webkit-background-clip:text;-webkit-text-fill-color:transparent;}
+.masthead-sub{font-size:11px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;margin-top:2px;}
+.user-badge{display:flex;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--border);border-radius:20px;padding:5px 12px 5px 6px;font-size:12px;color:#aaa;}
+.user-badge img{width:24px;height:24px;border-radius:50%;object-fit:cover;}
+.token-wrap{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:22px;margin-bottom:24px;}
+.field-label{font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:10px;display:block;}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+.inp{flex:1;min-width:0;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:10px 14px;color:var(--text);font-size:13px;outline:none;transition:border-color .2s;}
+.inp:focus{border-color:var(--gold);}
+.btn{padding:10px 18px;border-radius:8px;border:none;cursor:pointer;font-size:13px;font-weight:700;transition:opacity .15s,transform .1s;white-space:nowrap;}
+.btn:hover{opacity:.85;}.btn:active{transform:scale(.97);}.btn:disabled{opacity:.4;cursor:default;}
+.btn-gold{background:linear-gradient(135deg,var(--gold),#e09010);color:#111;}
+.btn-ghost{background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);color:#bbb;}
+.btn-sm{padding:7px 13px;font-size:12px;}
+.ok-text{font-size:12px;color:#69db7c;margin-top:6px;}
+.err-text{font-size:12px;color:#ff6b7a;margin-top:6px;}
+.controls{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:16px;}
+.controls select{background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:8px 12px;color:var(--text);font-size:13px;outline:none;cursor:pointer;}
+.controls select option{background:#1c1c22;}
+.sep{width:1px;height:26px;background:var(--border);flex-shrink:0;}
+.search-row{display:flex;gap:8px;margin-bottom:16px;align-items:center;flex-wrap:wrap;}
+.search-row .inp{max-width:300px;}
+.sort-row{display:flex;gap:6px;align-items:center;margin-left:auto;}
+.sort-label{font-size:11px;color:var(--muted);}
+.sort-btn{padding:4px 10px;border-radius:6px;border:1px solid rgba(255,255,255,0.1);background:transparent;color:#999;font-size:11px;cursor:pointer;transition:all .15s;}
+.sort-btn.active{background:rgba(255,255,255,.08);color:#ddd;border-color:rgba(255,255,255,.2);}
+.fchips{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:16px;align-items:center;}
+.fchip-label{font-size:11px;color:var(--muted);margin-right:4px;}
+.fchip{padding:5px 12px;border-radius:20px;border:1.5px solid rgba(255,255,255,0.1);background:transparent;color:#888;font-size:12px;font-weight:700;cursor:pointer;transition:all .15s;}
+.fchip:hover{border-color:rgba(255,255,255,.25);color:#ccc;}
+.fchip.all-active{border-color:var(--gold);color:var(--gold);background:rgba(245,200,66,.1);}
+.stats{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px;}
+.stat-pill{display:flex;align-items:center;gap:6px;background:var(--surface2);border:1px solid var(--border);border-radius:20px;padding:5px 12px;font-size:12px;}
+.stat-badge{width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:900;}
+.save-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:rgba(245,200,66,0.06);border:1px solid rgba(245,200,66,0.2);border-radius:12px;padding:12px 16px;margin-bottom:20px;}
+.save-bar-text{font-size:12px;color:#bba;flex:1;}
+.save-indicator{font-size:11px;color:#69db7c;}
+.list-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px;}
+.count-label{font-size:12px;color:var(--muted);}
+.card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:14px;}
+.acard{background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden;display:flex;flex-direction:column;transition:border-color .2s,transform .18s,box-shadow .18s;position:relative;}
+.acard:hover{border-color:rgba(255,255,255,.16);transform:translateY(-2px);box-shadow:0 8px 28px rgba(0,0,0,.45);}
+.card-top{display:flex;height:130px;overflow:hidden;position:relative;}
+.card-poster{width:90px;flex-shrink:0;background:#1a1a22;overflow:hidden;}
+.card-poster img{width:100%;height:100%;object-fit:cover;display:block;}
+.card-poster .no-img{width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:32px;background:linear-gradient(135deg,#1a1a2e,#2a1540);}
+.card-info{flex:1;padding:12px 12px 10px;display:flex;flex-direction:column;background:linear-gradient(to bottom,var(--surface) 60%,var(--surface2));min-width:0;}
+.card-title{font-family:'Noto Serif JP',serif;font-size:13px;font-weight:700;line-height:1.5;color:#f0ecdc;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;flex:1;}
+.card-meta{font-size:10px;color:var(--muted);margin-top:6px;}
+.card-links{display:flex;gap:5px;margin-top:5px;}
+.card-link{font-size:10px;color:var(--muted);border:1px solid rgba(255,255,255,.1);border-radius:4px;padding:2px 7px;text-decoration:none;transition:all .15s;}
+.card-link:hover{color:#ddd;border-color:rgba(255,255,255,.25);}
+.rating-badge{position:absolute;top:8px;right:8px;min-width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-family:'Bebas Neue',sans-serif;font-size:18px;letter-spacing:.5px;box-shadow:0 2px 10px rgba(0,0,0,.7);}
+.card-bottom{padding:10px 12px 12px;display:flex;flex-direction:column;gap:9px;border-top:1px solid var(--border);}
+.watched-row{display:flex;align-items:center;}
+.toggle-label{display:flex;align-items:center;gap:7px;cursor:pointer;font-size:11px;color:var(--muted);user-select:none;}
+.toggle-label input{display:none;}
+.toggle-box{width:32px;height:18px;border-radius:9px;background:#2a2a30;border:1px solid rgba(255,255,255,.12);position:relative;transition:background .2s;flex-shrink:0;}
+.toggle-box::after{content:'';position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:#555;transition:transform .18s,background .18s;}
+.toggle-label input:checked+.toggle-box{background:#3a7a50;border-color:#3a7a50;}
+.toggle-label input:checked+.toggle-box::after{transform:translateX(14px);background:#69db7c;}
+.rating-row{display:flex;gap:4px;}
+.ropt{flex:1;padding:7px 2px;border-radius:7px;border:1.5px solid rgba(255,255,255,.08);background:transparent;cursor:pointer;font-family:'Bebas Neue',sans-serif;font-size:14px;letter-spacing:.5px;color:#555;transition:all .15s;text-align:center;}
+.ropt:hover{border-color:rgba(255,255,255,.2);color:#aaa;}
+.ropt.active{border-color:transparent;}
+.comment-area{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:8px 10px;color:var(--text);font-size:12px;resize:none;outline:none;width:100%;line-height:1.6;height:68px;transition:border-color .2s;}
+.comment-area:focus{border-color:rgba(245,200,66,.4);}
+.comment-area::placeholder{color:#3a3a40;}
+.empty{grid-column:1/-1;padding:60px 20px;text-align:center;color:var(--muted);border:1.5px dashed rgba(255,255,255,.07);border-radius:14px;}
+.empty .big{font-size:36px;margin-bottom:12px;}
+.empty p{font-size:13px;line-height:1.7;}
+.loading-wrap{grid-column:1/-1;padding:50px 0;text-align:center;color:var(--muted);font-size:14px;}
+.spinner{display:inline-block;width:28px;height:28px;border:2.5px solid rgba(245,200,66,.2);border-top-color:var(--gold);border-radius:50%;animation:spin .7s linear infinite;margin-bottom:12px;}
+@keyframes spin{to{transform:rotate(360deg);}}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:none;}}
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1c1c26;border:1px solid rgba(255,255,255,.15);border-radius:10px;padding:11px 22px;font-size:13px;box-shadow:0 8px 24px rgba(0,0,0,.6);z-index:999;animation:fadeIn .25s ease;max-width:90vw;text-align:center;white-space:nowrap;}
+.toast.ok{border-color:rgba(105,219,124,.35);color:#69db7c;}
+.toast.err{border-color:rgba(255,107,122,.35);color:#ff6b7a;}
+.toast.info{border-color:rgba(245,200,66,.3);color:var(--gold);}
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:200;display:flex;align-items:center;justify-content:center;padding:20px;}
+.modal{background:var(--surface);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:24px;width:100%;max-width:480px;}
+.modal h3{font-size:15px;margin-bottom:8px;color:#e8e8f0;}
+.modal p{font-size:12px;color:#888;margin-bottom:12px;}
+.modal textarea{width:100%;height:160px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:10px;color:#ccc;font-size:12px;font-family:monospace;outline:none;resize:none;}
+.modal-btns{display:flex;gap:8px;margin-top:12px;justify-content:flex-end;}
+::-webkit-scrollbar{width:5px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:3px;}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="module">
+const { useState, useEffect, useCallback, useRef } = React;
+const html = htm.bind(React.createElement);
+
+const GQL        = "https://api.annict.com/graphql";
+const STORAGE_KEY = "animelog_v1";
+const TOKEN_KEY   = "animelog_token";
+
+const RATINGS = [
+  { id:"S+", label:"S+", color:"#f5c842", bg:"linear-gradient(135deg,#f5c842,#e8a020)", text:"#111" },
+  { id:"S",  label:"S",  color:"#f59342", bg:"linear-gradient(135deg,#f59342,#e06820)", text:"#fff" },
+  { id:"A+", label:"A+", color:"#e05a7a", bg:"linear-gradient(135deg,#e05a7a,#c0325a)", text:"#fff" },
+  { id:"A",  label:"A",  color:"#c06ab0", bg:"linear-gradient(135deg,#c06ab0,#9040a0)", text:"#fff" },
+  { id:"B",  label:"B",  color:"#6ab0e0", bg:"linear-gradient(135deg,#6ab0e0,#4080c0)", text:"#fff" },
+  { id:"C",  label:"C",  color:"#60b880", bg:"linear-gradient(135deg,#60b880,#3a9060)", text:"#fff" },
+  { id:"D",  label:"D",  color:"#888",    bg:"linear-gradient(135deg,#666,#444)",       text:"#ccc" },
+];
+const RATING_ORDER = {"S+":0,"S":1,"A+":2,"A":3,"B":4,"C":5,"D":6,"":99};
+const SEASON_NAMES = {SPRING:"春",SUMMER:"夏",AUTUMN:"秋",WINTER:"冬"};
+
+function buildSeasons() {
+  const en = ["spring","summer","autumn","winter"];
+  const ja = ["春","夏","秋","冬"];
+  const list = [];
+  let year = 2026, si = 3;
+  for (let i = 0; i < 12; i++) {
+    list.push({ value:`${year}-${en[si]}`, label:`${year}年 ${ja[si]}クール` });
+    si--; if (si < 0) { si = 3; year--; }
+  }
+  return list;
+}
+const SEASONS = buildSeasons();
+
+async function gqlFetch(token, query, vars = {}) {
+  const r = await fetch(GQL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+    body: JSON.stringify({ query, variables: vars }),
+  });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const j = await r.json();
+  if (j.errors) throw new Error(j.errors[0].message);
+  return j.data;
+}
+
+const Q_ME = `query{ viewer{ name avatarUrl } }`;
+
+// シーズン作品 + 視聴済みを一括取得
+const Q_SEASON_WITH_LIB = `
+query($season:String!){
+  viewer{
+    libraryEntries(states:[WATCHED],first:200){
+      nodes{ work{ annictId } }
+    }
+  }
+  searchWorks(seasons:[$season],orderBy:{field:WATCHERS_COUNT,direction:DESC},first:50){
+    nodes{
+      annictId title seasonName seasonYear
+      image{ recommendedImageUrl }
+      officialSiteUrl twitterUsername
+    }
+  }
+}`;
+
+function pickImage(image) {
+  if (!image) return null;
+  return image.recommendedImageUrl || null;
+}
+
+function workToItem(w, watched = false) {
+  return {
+    id: String(w.annictId), title: w.title,
+    season: w.seasonYear ? `${w.seasonYear}年${SEASON_NAMES[w.seasonName] ?? ""}` : "",
+    image: pickImage(w.image),
+    site: w.officialSiteUrl ?? null,
+    twitter: w.twitterUsername ?? null,
+    rating: "", comment: "", watched,
+  };
+}
+
+function loadSaved() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}"); }
+  catch { return {}; }
+}
+function mergeSaved(items, saved) {
+  const next = {};
+  for (const id in items) {
+    next[id] = { ...items[id], ...(saved[id] ? { rating: saved[id].rating ?? "", comment: saved[id].comment ?? "", watched: saved[id].watched ?? false } : {}) };
+  }
+  return next;
+}
+function extractSaveable(items) {
+  const out = {};
+  for (const id in items) {
+    const { rating, comment, watched } = items[id];
+    if (rating || comment || watched) out[id] = { rating, comment, watched };
+  }
+  return out;
+}
+
+// ── AnimeCard ──────────────────────────────────────────────────────────────
+
+function AnimeCard({ item, index, onChange }) {
+  const ri = RATINGS.find(r => r.id === item.rating);
+  return html`
+    <div class="acard" style=${{ animation: `fadeIn .3s ease ${Math.min(index, 20) * 25}ms both` }}>
+      <div class="card-top">
+        <div class="card-poster">
+          ${item.image
+            ? html`<img src=${item.image} alt=${item.title} />`
+            : html`<div class="no-img">🎞️</div>`}
+        </div>
+        <div class="card-info">
+          <div class="card-title">${item.title}</div>
+          <div class="card-meta">${item.season}</div>
+          <div class="card-links">
+            ${item.site    && html`<a class="card-link" href=${item.site} target="_blank" rel="noreferrer">公式</a>`}
+            ${item.twitter && html`<a class="card-link" href=${`https://twitter.com/${item.twitter}`} target="_blank" rel="noreferrer">X</a>`}
+          </div>
+        </div>
+        ${ri && html`<div class="rating-badge" style=${{ background: ri.bg, color: ri.text }}>${ri.label}</div>`}
+      </div>
+      <div class="card-bottom">
+        <div class="watched-row">
+          <label class="toggle-label">
+            <input type="checkbox" checked=${item.watched} onChange=${e => onChange({ watched: e.target.checked })} />
+            <div class="toggle-box"></div>
+            視聴済み
+          </label>
+        </div>
+        <div class="rating-row">
+          ${RATINGS.map(r => html`
+            <button key=${r.id}
+              class=${`ropt${item.rating === r.id ? " active" : ""}`}
+              style=${item.rating === r.id ? { background: r.bg, color: r.text } : {}}
+              onClick=${() => onChange({ rating: item.rating === r.id ? "" : r.id })}>
+              ${r.label}
+            </button>
+          `)}
+        </div>
+        <textarea class="comment-area" placeholder="感想・メモ…"
+          value=${item.comment}
+          onChange=${e => onChange({ comment: e.target.value })}>
+        </textarea>
+      </div>
+    </div>
+  `;
+}
+
+// ── App ────────────────────────────────────────────────────────────────────
+
+function App() {
+  const [tokenInput, setTokenInput] = useState(() => localStorage.getItem(TOKEN_KEY) || "");
+  const [token,      setToken]      = useState("");
+  const [user,       setUser]       = useState(null);
+  const [tokenState, setTokenState] = useState("idle");
+
+  const [season,  setSeason]  = useState(SEASONS[0].value);
+  const [items,   setItems]   = useState({});
+  const [loading, setLoading] = useState(false);
+
+  const [filterRating,  setFilterRating]  = useState("all");
+  const [filterWatched, setFilterWatched] = useState("all");
+  const [sortKey,  setSortKey]  = useState("default");
+  const [searchQ,  setSearchQ]  = useState("");
+  const [savedAt,  setSavedAt]  = useState(null);
+
+  const [showImport, setShowImport] = useState(false);
+  const [importText, setImportText] = useState("");
+
+  const [toast,   setToast]   = useState(null);
+  const toastRef  = useRef(null);
+
+  const showToast = (msg, type = "info", ms = 2800) => {
+    if (toastRef.current) clearTimeout(toastRef.current);
+    setToast({ msg, type });
+    toastRef.current = setTimeout(() => setToast(null), ms);
+  };
+
+  // Auto-save
+  useEffect(() => {
+    if (Object.keys(items).length === 0) return;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(extractSaveable(items)));
+    setSavedAt(new Date());
+  }, [items]);
+
+  // Auto-login
+  useEffect(() => {
+    const saved = localStorage.getItem(TOKEN_KEY);
+    if (saved) tryConnect(saved, true);
+  }, []);
+
+  const tryConnect = async (tok, silent = false) => {
+    try {
+      const d = await gqlFetch(tok, Q_ME);
+      setToken(tok);
+      setUser(d.viewer);
+      setTokenState("ok");
+      localStorage.setItem(TOKEN_KEY, tok);
+      if (!silent) showToast(`${d.viewer.name} さん、ようこそ！`, "ok");
+    } catch {
+      setTokenState("err");
+      if (!silent) showToast("トークンが無効です", "err");
+    }
+  };
+
+  const applyToken = () => { if (tokenInput.trim()) tryConnect(tokenInput.trim()); };
+
+  const clearToken = () => {
+    setToken(""); setUser(null); setTokenState("idle");
+    setTokenInput(""); setItems({});
+    localStorage.removeItem(TOKEN_KEY);
+    showToast("ログアウトしました", "info");
+  };
+
+  const fetchSeason = useCallback(async (tok, s) => {
+    if (!tok) return;
+    setLoading(true);
+    try {
+      const d = await gqlFetch(tok, Q_SEASON_WITH_LIB, { season: s });
+      const watchedIds = new Set(
+        (d.viewer?.libraryEntries?.nodes ?? []).map(n => String(n.work.annictId))
+      );
+      const nodes = d?.searchWorks?.nodes ?? [];
+      const saved = loadSaved();
+      const fresh = {};
+      nodes.forEach(w => {
+        fresh[String(w.annictId)] = workToItem(w, watchedIds.has(String(w.annictId)));
+      });
+      setItems(mergeSaved(fresh, saved));
+      showToast(`${nodes.length} 件読み込みました`, "ok");
+    } catch (e) { showToast(e.message, "err"); }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => {
+    if (token) { setItems({}); fetchSeason(token, season); }
+  }, [token, season]);
+
+  const updateItem = (id, patch) =>
+    setItems(prev => ({ ...prev, [id]: { ...prev[id], ...patch } }));
+
+  const exportData = () => {
+    const blob = new Blob([JSON.stringify(extractSaveable(items), null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = "animelog_backup.json"; a.click();
+    showToast("JSONをエクスポートしました", "ok");
+  };
+
+  const doImport = () => {
+    try {
+      const data = JSON.parse(importText);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      setItems(prev => mergeSaved(prev, data));
+      setShowImport(false); setImportText("");
+      showToast("インポートしました", "ok");
+    } catch { showToast("JSONの形式が正しくありません", "err"); }
+  };
+
+  const allItems = Object.values(items);
+  const visible = allItems
+    .filter(x => {
+      if (filterRating === "unrated" && x.rating !== "") return false;
+      if (filterRating !== "all" && filterRating !== "unrated" && x.rating !== filterRating) return false;
+      if (filterWatched === "watched"   && !x.watched) return false;
+      if (filterWatched === "unwatched" &&  x.watched) return false;
+      if (searchQ.trim() && !x.title.toLowerCase().includes(searchQ.trim().toLowerCase())) return false;
+      return true;
+    })
+    .sort((a, b) => {
+      if (sortKey === "rating") return (RATING_ORDER[a.rating] ?? 99) - (RATING_ORDER[b.rating] ?? 99);
+      if (sortKey === "title")  return a.title.localeCompare(b.title, "ja");
+      return 0;
+    });
+
+  const stats = RATINGS.map(r => ({ ...r, count: allItems.filter(x => x.rating === r.id).length })).filter(r => r.count > 0);
+  const ratedCount   = allItems.filter(x => x.rating !== "").length;
+  const watchedCount = allItems.filter(x => x.watched).length;
+  const fmtTime = d => d ? `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}` : "";
+
+  return html`
+    <div class="wrap">
+
+      <div class="masthead">
+        <div>
+          <div class="masthead-logo">ANIME LOG</div>
+          <div class="masthead-sub">季節アニメ 評価ノート</div>
+        </div>
+        ${user && html`
+          <div style=${{ display:"flex", gap:"8px", alignItems:"center", flexWrap:"wrap" }}>
+            <div class="user-badge">
+              ${user.avatarUrl && html`<img src=${user.avatarUrl} alt="avatar" />`}
+              <span>${user.name}</span>
+            </div>
+            <button class="btn btn-ghost btn-sm" onClick=${clearToken}>ログアウト</button>
+          </div>
+        `}
+      </div>
+
+      <div class="token-wrap">
+        <label class="field-label">Annict アクセストークン</label>
+        <div class="row">
+          <input class="inp" type="password"
+            placeholder="annict.com/settings/apps から発行したトークンを入力"
+            value=${tokenInput}
+            onInput=${e => setTokenInput(e.target.value)}
+            onKeyDown=${e => e.key === "Enter" && applyToken()} />
+          <button class="btn btn-gold" onClick=${applyToken}>接続</button>
+        </div>
+        ${tokenState === "ok"  && html`<div class="ok-text">✓ 接続済み（次回から自動ログイン）</div>`}
+        ${tokenState === "err" && html`<div class="err-text">✗ トークンエラー</div>`}
+      </div>
+
+      ${token && html`
+        <div class="controls">
+          <select value=${season} onChange=${e => setSeason(e.target.value)}>
+            ${SEASONS.map(s => html`<option key=${s.value} value=${s.value}>${s.label}</option>`)}
+          </select>
+          <button class="btn btn-ghost btn-sm"
+            onClick=${() => { setItems({}); fetchSeason(token, season); }}
+            disabled=${loading}>
+            ${loading ? "読込中…" : "🔄 再読込"}
+          </button>
+          <div class="sep"></div>
+          <button class="btn btn-ghost btn-sm"
+            onClick=${() => { setItems({}); fetchSeason(token, season); }}
+            disabled=${loading}>
+            📚 視聴状態を再取得
+          </button>
+          <div class="sep"></div>
+          <button class="btn btn-ghost btn-sm" onClick=${exportData}>💾 エクスポート</button>
+          <button class="btn btn-ghost btn-sm" onClick=${() => setShowImport(true)}>📂 インポート</button>
+        </div>
+
+        <div class="save-bar">
+          <span class="save-bar-text">💾 評価・感想はこのブラウザに自動保存されます。別端末に引き継ぐにはエクスポート→インポートを使ってください。</span>
+          ${savedAt && html`<span class="save-indicator">最終保存 ${fmtTime(savedAt)}</span>`}
+        </div>
+
+        <div class="search-row">
+          <input class="inp" placeholder="タイトルで絞り込み…"
+            value=${searchQ} onInput=${e => setSearchQ(e.target.value)} />
+          <div class="sort-row">
+            <span class="sort-label">並び順：</span>
+            ${[["default","デフォルト"],["rating","評価順"],["title","50音順"]].map(([k, l]) => html`
+              <button key=${k} class=${`sort-btn${sortKey === k ? " active" : ""}`}
+                onClick=${() => setSortKey(k)}>${l}</button>
+            `)}
+          </div>
+        </div>
+
+        <div class="fchips">
+          <span class="fchip-label">評価：</span>
+          <button class=${`fchip${filterRating === "all" ? " all-active" : ""}`}
+            onClick=${() => setFilterRating("all")}>ALL</button>
+          ${RATINGS.map(r => html`
+            <button key=${r.id} class="fchip"
+              style=${filterRating === r.id ? { borderColor: r.color, color: r.color, background: r.color + "20" } : {}}
+              onClick=${() => setFilterRating(filterRating === r.id ? "all" : r.id)}>
+              ${r.label}
+            </button>
+          `)}
+          <button class="fchip"
+            style=${filterRating === "unrated" ? { borderColor:"#666", color:"#aaa", background:"#66666620" } : {}}
+            onClick=${() => setFilterRating(filterRating === "unrated" ? "all" : "unrated")}>未評価</button>
+          <div class="sep" style=${{ marginLeft:"4px" }}></div>
+          ${[["all","すべて"],["watched","👁 視聴済"],["unwatched","未視聴"]].map(([v, l]) => html`
+            <button key=${v} class=${`fchip${filterWatched === v ? " all-active" : ""}`}
+              onClick=${() => setFilterWatched(v)}>${l}</button>
+          `)}
+        </div>
+
+        ${(stats.length > 0 || watchedCount > 0) && html`
+          <div class="stats">
+            ${ratedCount > 0 && html`
+              <div class="stat-pill" style=${{ borderColor:"rgba(245,200,66,.25)" }}>
+                <span style=${{ fontSize:"11px", color:"var(--gold)" }}>評価済 ${ratedCount} 件</span>
+              </div>`}
+            ${watchedCount > 0 && html`
+              <div class="stat-pill" style=${{ borderColor:"rgba(105,219,124,.25)" }}>
+                <span style=${{ fontSize:"11px", color:"#69db7c" }}>視聴済 ${watchedCount} 件</span>
+              </div>`}
+            ${stats.map(s => html`
+              <div key=${s.id} class="stat-pill" style=${{ borderColor: s.color + "44" }}>
+                <div class="stat-badge" style=${{ background: s.bg, color: s.text }}>${s.label}</div>
+                <span style=${{ fontSize:"12px", color: s.color }}>${s.count}</span>
+              </div>
+            `)}
+          </div>
+        `}
+
+        <div class="list-header">
+          <span class="count-label">${visible.length} 件表示中</span>
+        </div>
+
+        <div class="card-grid">
+          ${loading && html`
+            <div class="loading-wrap">
+              <div class="spinner"></div>
+              <div>読み込み中…</div>
+            </div>`}
+          ${!loading && visible.length === 0 && html`
+            <div class="empty">
+              <div class="big">📭</div>
+              <p>表示できる作品がありません。<br/>上の「再読込」から読み込んでください。</p>
+            </div>`}
+          ${!loading && visible.map((item, i) => html`
+            <${AnimeCard} key=${item.id} item=${item} index=${i}
+              onChange=${patch => updateItem(item.id, patch)} />
+          `)}
+        </div>
+      `}
+
+      ${showImport && html`
+        <div class="overlay" onClick=${() => setShowImport(false)}>
+          <div class="modal" onClick=${e => e.stopPropagation()}>
+            <h3>📂 JSONインポート</h3>
+            <p>エクスポートしたJSONを貼り付けてください。現在の評価・感想に上書きマージします。</p>
+            <textarea
+              placeholder=${'{"12345":{"rating":"S","comment":"面白い","watched":true},...}'}
+              value=${importText}
+              onInput=${e => setImportText(e.target.value)}>
+            </textarea>
+            <div class="modal-btns">
+              <button class="btn btn-ghost btn-sm" onClick=${() => setShowImport(false)}>キャンセル</button>
+              <button class="btn btn-gold btn-sm"  onClick=${doImport}>インポート</button>
+            </div>
+          </div>
+        </div>
+      `}
+
+      ${toast && html`<div class=${`toast ${toast.type}`}>${toast.msg}</div>`}
+    </div>
+  `;
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(html`<${App} />`);
+</script>
+</body>
+</html>

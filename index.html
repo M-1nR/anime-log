@@ -393,15 +393,31 @@ const anilistCache = {}; // id -> url | null
 
 const wait = (ms) => new Promise(r => setTimeout(r, ms));
 
-// エイリアスを使って最大20件を1リクエストで取得
+// 1件ずつ取得（バッチ失敗時のフォールバック）
+async function fetchAniListSingle(item) {
+  const query = `query($t:String){ Media(search:$t, type:ANIME){ coverImage{ large } } }`;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      if (attempt > 0) await wait(1000);
+      const r = await fetch("https://graphql.anilist.co", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query, variables: { t: item.title } })
+      });
+      if (r.status === 429) { await wait(5000); continue; }
+      if (!r.ok) break;
+      const j = await r.json();
+      return j?.data?.Media?.coverImage?.large ?? null;
+    } catch {}
+  }
+  return null;
+}
+
+// エイリアス+変数を使って最大10件を1リクエストで取得
 async function fetchAniListBatch(items) {
-  // キャッシュ未取得のものだけ対象
   const targets = items.filter(x => anilistCache[x.id] === undefined);
   if (targets.length === 0) return;
 
-  // GraphQLエイリアスで一括クエリ生成
-  // 例: a0: Media(search:"タイトル", type:ANIME){ coverImage{ large } }
-  // query定義（変数名 $t0, $t1, ... を使う）
   const varDefs = targets.map((_, i) => `$t${i}: String`).join(", ");
   const fields  = targets.map((_, i) =>
     `a${i}: Media(search: $t${i}, type: ANIME) { coverImage { large } }`
@@ -419,21 +435,36 @@ async function fetchAniListBatch(items) {
         body: JSON.stringify({ query, variables })
       });
       if (r.status === 429) {
-        const retry = parseInt(r.headers.get("Retry-After") || "5");
-        await wait(retry * 1000);
+        await wait((parseInt(r.headers.get("Retry-After") || "5")) * 1000);
         continue;
       }
       if (!r.ok) break;
       const j = await r.json();
-      // レスポンスをキャッシュに書き込む
+      // errorsがある場合も含めて確認
+      const hasErrors = j?.errors?.length > 0;
       targets.forEach((x, i) => {
-        anilistCache[x.id] = j?.data?.[`a${i}`]?.coverImage?.large ?? null;
+        const url = j?.data?.[`a${i}`]?.coverImage?.large;
+        // dataに値があればキャッシュ（errorsがあっても部分的に取れることがある）
+        if (url !== undefined) anilistCache[x.id] = url ?? null;
       });
+      // バッチ全体が成功していれば終了
+      if (!hasErrors) return;
+      // errorsがある場合は未取得分を個別フォールバック
+      const stillPending = targets.filter(x => anilistCache[x.id] === undefined);
+      for (const item of stillPending) {
+        anilistCache[item.id] = await fetchAniListSingle(item);
+        await wait(200);
+      }
       return;
     } catch {}
   }
-  // 失敗時は全て null でキャッシュ
-  targets.forEach(x => { if (anilistCache[x.id] === undefined) anilistCache[x.id] = null; });
+  // バッチ自体が全滅した場合は個別取得にフォールバック
+  for (const item of targets) {
+    if (anilistCache[item.id] === undefined) {
+      anilistCache[item.id] = await fetchAniListSingle(item);
+      await wait(200);
+    }
+  }
 }
 
 function loadImgFromUrl(url) {
@@ -448,10 +479,10 @@ function loadImgFromUrl(url) {
 
 // 複数アイテムの画像URLをまとめてキャッシュに入れる（出力前に呼ぶ）
 async function preloadAniListImages(items) {
-  const BATCH = 20;
+  const BATCH = 10; // バッチサイズを20→10に削減して安定性向上
   for (let i = 0; i < items.length; i += BATCH) {
     await fetchAniListBatch(items.slice(i, i + BATCH));
-    if (i + BATCH < items.length) await wait(500); // バッチ間500ms待機
+    if (i + BATCH < items.length) await wait(600);
   }
 }
 

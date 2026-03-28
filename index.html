@@ -45,6 +45,10 @@ input,textarea,select,button{font-family:'Noto Sans JP',sans-serif;}
 .sort-label{font-size:11px;color:var(--muted);}
 .sort-btn{padding:4px 10px;border-radius:6px;border:1px solid rgba(255,255,255,0.1);background:transparent;color:#999;font-size:11px;cursor:pointer;transition:all .15s;}
 .sort-btn.active{background:rgba(255,255,255,.08);color:#ddd;border-color:rgba(255,255,255,.2);}
+.media-tabs{display:flex;gap:0;margin-bottom:20px;border-bottom:2px solid var(--border);}
+.media-tab{padding:9px 22px;border:none;background:transparent;color:var(--muted);font-size:13px;font-weight:700;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px;transition:color .15s,border-color .15s;font-family:'Noto Sans JP',sans-serif;}
+.media-tab:hover{color:#ddd;}
+.media-tab.active{color:var(--gold);border-bottom-color:var(--gold);}
 .fchips{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:16px;align-items:center;}
 .fchip-label{font-size:11px;color:var(--muted);margin-right:4px;}
 .fchip{padding:5px 12px;border-radius:20px;border:1.5px solid rgba(255,255,255,0.1);background:transparent;color:#888;font-size:12px;font-weight:700;cursor:pointer;transition:all .15s;}
@@ -198,7 +202,7 @@ query($season:String!, $yearSeasons:[String!]!, $after:String){
   searchWorks(seasons:[$season], orderBy:{field:WATCHERS_COUNT,direction:DESC}, first:50, after:$after){
     pageInfo{ hasNextPage endCursor }
     nodes{
-      annictId title seasonName seasonYear
+      annictId title seasonName seasonYear media
       image{ recommendedImageUrl }
       officialSiteUrl twitterUsername
     }
@@ -217,6 +221,7 @@ function workToItem(w, watched = false) {
     image: pickImage(w.image),
     site: w.officialSiteUrl ?? null,
     twitter: w.twitterUsername ?? null,
+    media: w.media ?? "tv",
     rating: "", comment: "", watched,
   };
 }
@@ -303,6 +308,7 @@ function App() {
   const [items,   setItems]   = useState({});
   const [loading, setLoading] = useState(false);
 
+  const [filterMedia,   setFilterMedia]   = useState("all");
   const [filterRating,  setFilterRating]  = useState("all");
   const [filterWatched, setFilterWatched] = useState("all");
   const [sortKey,  setSortKey]  = useState("default");
@@ -444,6 +450,146 @@ function App() {
     showToast("JSONをエクスポートしました", "ok");
   };
 
+  // ── 画像出力 ────────────────────────────────────────────────────────────
+  const exportImage = async () => {
+    if (visible.length === 0) { showToast("表示中の作品がありません", "err"); return; }
+    showToast("画像を生成中…", "info", 10000);
+
+    const CARD_W = 110, CARD_H = 160, POSTER_H = 110;
+    const COLS = Math.min(8, visible.length);
+    const ROWS = Math.ceil(visible.length / COLS);
+    const PAD = 16, GAP = 8;
+    const HEADER_H = 64;
+    const CW = PAD * 2 + COLS * CARD_W + (COLS - 1) * GAP;
+    const CH = HEADER_H + PAD + ROWS * CARD_H + (ROWS - 1) * GAP + PAD;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = CW; canvas.height = CH;
+    const ctx = canvas.getContext("2d");
+
+    // 背景
+    ctx.fillStyle = "#0d0d0f";
+    ctx.fillRect(0, 0, CW, CH);
+
+    // ヘッダー
+    ctx.fillStyle = "#f5c842";
+    ctx.font = "bold 28px 'Helvetica Neue', Arial, sans-serif";
+    ctx.fillText("ANIME LOG", PAD, 40);
+    const selLabel = SEASONS.find(s => s.value === season)?.label ?? season;
+    ctx.fillStyle = "#666";
+    ctx.font = "14px 'Helvetica Neue', Arial, sans-serif";
+    ctx.fillText(selLabel, PAD, 58);
+
+    // 各カードを描画
+    const RATING_MAP = {
+      "S+":{ bg:"#f5c842", text:"#111" }, "S":{ bg:"#f59342", text:"#fff" },
+      "A+":{ bg:"#e05a7a", text:"#fff" }, "A":{ bg:"#c06ab0", text:"#fff" },
+      "B":{ bg:"#6ab0e0",  text:"#fff" }, "C":{ bg:"#60b880", text:"#fff" },
+      "D":{ bg:"#555",     text:"#ccc" }
+    };
+
+    const loadImg = (src) => new Promise(res => {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.onload  = () => res(img);
+      img.onerror = () => res(null);
+      img.src = src;
+    });
+
+    for (let i = 0; i < visible.length; i++) {
+      const item = visible[i];
+      const col = i % COLS;
+      const row = Math.floor(i / COLS);
+      const x = PAD + col * (CARD_W + GAP);
+      const y = HEADER_H + PAD + row * (CARD_H + GAP);
+
+      // カード背景
+      ctx.fillStyle = "#141418";
+      roundRect(ctx, x, y, CARD_W, CARD_H, 8);
+      ctx.fill();
+
+      // ポスター画像
+      if (item.image) {
+        const img = await loadImg(item.image);
+        if (img) {
+          ctx.save();
+          roundRect(ctx, x, y, CARD_W, POSTER_H, 8);
+          ctx.clip();
+          // アスペクト維持でセンタークロップ
+          const iAR = img.width / img.height;
+          const cAR = CARD_W / POSTER_H;
+          let sw, sh, sx, sy;
+          if (iAR > cAR) { sh = img.height; sw = sh * cAR; sx = (img.width - sw) / 2; sy = 0; }
+          else            { sw = img.width;  sh = sw / cAR; sy = (img.height - sh) / 2; sx = 0; }
+          ctx.drawImage(img, sx, sy, sw, sh, x, y, CARD_W, POSTER_H);
+          ctx.restore();
+        } else {
+          ctx.fillStyle = "#1a1a2e";
+          ctx.fillRect(x, y, CARD_W, POSTER_H);
+        }
+      } else {
+        ctx.fillStyle = "#1a1a2e";
+        ctx.fillRect(x, y, CARD_W, POSTER_H);
+      }
+
+      // タイトル
+      ctx.fillStyle = "#e8e4dc";
+      ctx.font = "bold 10px 'Helvetica Neue', Arial, sans-serif";
+      const lines = wrapText(ctx, item.title, CARD_W - 8);
+      lines.slice(0, 2).forEach((line, li) => {
+        ctx.fillText(line, x + 4, y + POSTER_H + 12 + li * 13, CARD_W - 8);
+      });
+
+      // 評価バッジ
+      if (item.rating && RATING_MAP[item.rating]) {
+        const rc = RATING_MAP[item.rating];
+        const BW = 28, BH = 20, BX = x + CARD_W - BW - 4, BY = y + 4;
+        ctx.fillStyle = rc.bg;
+        roundRect(ctx, BX, BY, BW, BH, 5);
+        ctx.fill();
+        ctx.fillStyle = rc.text;
+        ctx.font = "bold 11px 'Helvetica Neue', Arial, sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText(item.rating, BX + BW / 2, BY + 14);
+        ctx.textAlign = "left";
+      }
+    }
+
+    // ダウンロード
+    const a = document.createElement("a");
+    a.download = `animelog_${season}.png`;
+    a.href = canvas.toDataURL("image/png");
+    a.click();
+    showToast("画像を保存しました", "ok");
+  };
+
+  function roundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+  }
+
+  function wrapText(ctx, text, maxW) {
+    const lines = [];
+    let cur = "";
+    for (const ch of text) {
+      const test = cur + ch;
+      if (ctx.measureText(test).width > maxW && cur.length > 0) {
+        lines.push(cur); cur = ch;
+      } else { cur = test; }
+    }
+    if (cur) lines.push(cur);
+    return lines;
+  }
+
   const doImport = () => {
     try {
       const data = JSON.parse(importText);
@@ -457,6 +603,8 @@ function App() {
   const allItems = Object.values(items);
   const visible = allItems
     .filter(x => {
+      if (filterMedia === "tv"    && x.media !== "tv")    return false;
+      if (filterMedia === "movie" && x.media !== "movie") return false;
       if (filterRating === "unrated" && x.rating !== "") return false;
       if (filterRating !== "all" && filterRating !== "unrated" && x.rating !== filterRating) return false;
       if (filterWatched === "watched"   && !x.watched) return false;
@@ -526,12 +674,21 @@ function App() {
           </button>
           <div class="sep"></div>
           <button class="btn btn-ghost btn-sm" onClick=${exportData}>💾 エクスポート</button>
+          <button class="btn btn-ghost btn-sm" onClick=${exportImage}>🖼 画像出力</button>
           <button class="btn btn-ghost btn-sm" onClick=${() => setShowImport(true)}>📂 インポート</button>
         </div>
 
         <div class="save-bar">
           <span class="save-bar-text">💾 評価・感想はこのブラウザに自動保存されます。別端末に引き継ぐにはエクスポート→インポートを使ってください。</span>
           ${savedAt && html`<span class="save-indicator">最終保存 ${fmtTime(savedAt)}</span>`}
+        </div>
+
+        <div class="media-tabs">
+          ${[["all","すべて"],["tv","アニメ"],["movie","映画"]].map(([v,l]) => html`
+            <button key=${v}
+              class=${`media-tab${filterMedia === v ? " active" : ""}`}
+              onClick=${() => setFilterMedia(v)}>${l}</button>
+          `)}
         </div>
 
         <div class="search-row">

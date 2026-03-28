@@ -389,16 +389,27 @@ function AnimeCard({ item, index, onChange }) {
 
 // ── 画像取得ユーティリティ（グローバルスコープ） ──────────────────────────
 async function fetchAniListImage(title) {
-  try {
-    const q = `query($t:String){Media(search:$t,type:ANIME){coverImage{large}}}`;
-    const r = await fetch("https://graphql.anilist.co", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query: q, variables: { t: title } })
-    });
-    const j = await r.json();
-    return j?.data?.Media?.coverImage?.large ?? null;
-  } catch { return null; }
+  const q = `query($t:String){Media(search:$t,type:ANIME){coverImage{large}}}`;
+  const wait = (ms) => new Promise(r => setTimeout(r, ms));
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      if (attempt > 0) await wait(attempt * 1000);
+      const r = await fetch("https://graphql.anilist.co", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: q, variables: { t: title } })
+      });
+      if (r.status === 429) {
+        const retry = parseInt(r.headers.get("Retry-After") || "2");
+        await wait(retry * 1000);
+        continue;
+      }
+      if (!r.ok) return null;
+      const j = await r.json();
+      return j?.data?.Media?.coverImage?.large ?? null;
+    } catch {}
+  }
+  return null;
 }
 
 function loadImgFromUrl(url) {
@@ -415,7 +426,7 @@ function loadImgFromUrl(url) {
 const anilistCache = {};
 
 async function loadImg(item) {
-  if (!anilistCache[item.id]) {
+  if (anilistCache[item.id] === undefined) {
     anilistCache[item.id] = await fetchAniListImage(item.title);
   }
   const aniUrl = anilistCache[item.id];
@@ -843,11 +854,13 @@ function App() {
     };
 
     const imgMap = {};
-    const PARALLEL = 6;
+    const PARALLEL = 3;
+    const waitTier = (ms) => new Promise(r => setTimeout(r, ms));
     for (let i = 0; i < rated.length; i += PARALLEL) {
       const chunk = rated.slice(i, i + PARALLEL);
       const results = await Promise.all(chunk.map(fetchOne));
       results.forEach(([id, img]) => { imgMap[id] = img; });
+      if (i + PARALLEL < rated.length) await waitTier(300);
     }
 
     // ── Step2: レイアウト計算 ──

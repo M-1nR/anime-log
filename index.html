@@ -524,8 +524,8 @@ function App() {
     const ROWS_PER_PAGE = 6;
     const CARDS_PER_PAGE = COLS * ROWS_PER_PAGE;
     const PAD = 24, GAP = 14;
-    const HEADER_H = 72;
-    const FOOTER_H = 32;
+    const HEADER_H = 0;
+    const FOOTER_H = 0;
     const CW = PAD * 2 + COLS * CARD_W + (COLS - 1) * GAP;
     const CH = HEADER_H + PAD + ROWS_PER_PAGE * CARD_H + (ROWS_PER_PAGE - 1) * GAP + PAD + FOOTER_H;
 
@@ -612,43 +612,20 @@ function App() {
     };
 
     const totalPages = Math.ceil(visible.length / CARDS_PER_PAGE);
-    const selLabel   = SEASONS.find(s => s.value === season)?.label ?? season;
 
     for (let page = 0; page < totalPages; page++) {
       const pageItems = visible.slice(page * CARDS_PER_PAGE, (page + 1) * CARDS_PER_PAGE);
       const rows = Math.ceil(pageItems.length / COLS);
-      const canvasH = HEADER_H + PAD + rows * CARD_H + (rows - 1) * GAP + PAD + FOOTER_H;
+      const canvasH = PAD + rows * CARD_H + (rows - 1) * GAP + PAD;
 
       const canvas = document.createElement("canvas");
       canvas.width  = CW;
       canvas.height = canvasH;
       const ctx = canvas.getContext("2d");
 
-      // 背景
-      ctx.fillStyle = "#0d0d0f";
+      // 背景（白）
+      ctx.fillStyle = "#ffffff";
       ctx.fillRect(0, 0, CW, canvasH);
-
-      // 上部ライン装飾
-      const grad = ctx.createLinearGradient(0, 0, CW, 0);
-      grad.addColorStop(0, "#f5c842");
-      grad.addColorStop(1, "#e05a7a");
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, CW, 3);
-
-      // ヘッダー
-      ctx.fillStyle = "#f5c842";
-      ctx.font = "bold 32px 'Helvetica Neue', Arial, sans-serif";
-      ctx.fillText("ANIME LOG", PAD, 44);
-      ctx.fillStyle = "#888";
-      ctx.font = "15px 'Helvetica Neue', Arial, sans-serif";
-      ctx.fillText(selLabel, PAD, 64);
-      if (totalPages > 1) {
-        ctx.textAlign = "right";
-        ctx.fillStyle = "#555";
-        ctx.font = "13px 'Helvetica Neue', Arial, sans-serif";
-        ctx.fillText(`${page + 1} / ${totalPages}`, CW - PAD, 64);
-        ctx.textAlign = "left";
-      }
 
       // カード描画
       for (let i = 0; i < pageItems.length; i++) {
@@ -659,7 +636,7 @@ function App() {
         const cy   = HEADER_H + PAD + row * (CARD_H + GAP);
 
         // ── カード背景 ──
-        drawRoundRect(ctx, cx, cy, CARD_W, CARD_H, 8, "#141418", "rgba(255,255,255,0.08)");
+        drawRoundRect(ctx, cx, cy, CARD_W, CARD_H, 8, "#f8f9fa", "#d0d5dd");
 
         // ── 左: ポスター画像 ──
         const img = await loadImg(item);
@@ -685,21 +662,21 @@ function App() {
           ctx.restore();
         } else {
           // プレースホルダー
-          ctx.fillStyle = "#1c1c28";
+          ctx.fillStyle = "#e8eaf0";
           ctx.beginPath();
           ctx.moveTo(cx + 8, cy); ctx.lineTo(cx + POSTER_W, cy);
           ctx.lineTo(cx + POSTER_W, cy + POSTER_H); ctx.lineTo(cx + 8, cy + POSTER_H);
           ctx.quadraticCurveTo(cx, cy + POSTER_H, cx, cy + POSTER_H - 8);
           ctx.lineTo(cx, cy + 8); ctx.quadraticCurveTo(cx, cy, cx + 8, cy);
           ctx.closePath(); ctx.fill();
-          ctx.fillStyle = "#2a2a3e";
+          ctx.fillStyle = "#9098b0";
           ctx.font = "30px Arial"; ctx.textAlign = "center";
           ctx.fillText("🎞️", cx + POSTER_W / 2, cy + POSTER_H / 2 + 12);
           ctx.textAlign = "left";
         }
 
         // ── ポスターと情報エリアの縦区切り ──
-        ctx.strokeStyle = "rgba(255,255,255,0.06)";
+        ctx.strokeStyle = "#e0e4ec";
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.moveTo(cx + POSTER_W, cy + 8);
@@ -711,12 +688,12 @@ function App() {
         const iw = INFO_W - 16;
 
         // シーズン
-        ctx.fillStyle = "#555";
+        ctx.fillStyle = "#7a8599";
         ctx.font = "11px 'Helvetica Neue', Arial, sans-serif";
         ctx.fillText(item.season || "", ix, cy + 16, iw);
 
         // タイトル
-        ctx.fillStyle = "#f0ecdc";
+        ctx.fillStyle = "#1a1d24";
         ctx.font = "bold 14px 'Helvetica Neue', Arial, sans-serif";
         const titleLines = wrapLines(ctx, item.title, iw, 2);
         titleLines.forEach((line, li) => {
@@ -736,7 +713,7 @@ function App() {
         }
 
         // 区切り線
-        ctx.strokeStyle = "rgba(255,255,255,0.07)";
+        ctx.strokeStyle = "#e0e4ec";
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.moveTo(ix, cy + 106);
@@ -745,25 +722,18 @@ function App() {
 
         // 感想メモ
         if (item.comment && item.comment.trim()) {
-          ctx.fillStyle = "#999";
+          ctx.fillStyle = "#4a5568";
           ctx.font = "11px 'Helvetica Neue', Arial, sans-serif";
           const commentLines = wrapLines(ctx, item.comment.trim(), iw, 4);
           commentLines.forEach((line, li) => {
             ctx.fillText(line, ix, cy + 122 + li * 14, iw);
           });
         } else {
-          ctx.fillStyle = "#3a3a42";
+          ctx.fillStyle = "#b0b8c8";
           ctx.font = "11px 'Helvetica Neue', Arial, sans-serif";
           ctx.fillText("（感想なし）", ix, cy + 122, iw);
         }
       }
-
-      // フッター
-      ctx.fillStyle = "#333";
-      ctx.font = "11px 'Helvetica Neue', Arial, sans-serif";
-      ctx.textAlign = "center";
-      ctx.fillText("generated by ANIME LOG", CW / 2, canvasH - 12);
-      ctx.textAlign = "left";
 
       // ダウンロード
       const suffix = totalPages > 1 ? `_${page + 1}of${totalPages}` : "";

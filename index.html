@@ -7,6 +7,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/htm/3.1.1/htm.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=Noto+Serif+JP:wght@700&display=swap" rel="stylesheet"/>
 <style>
@@ -657,6 +658,7 @@ function App() {
     };
 
     const totalPages = Math.ceil(exportTargets.length / CARDS_PER_PAGE);
+    const canvases = [];
 
     for (let page = 0; page < totalPages; page++) {
       const pageItems = exportTargets.slice(page * CARDS_PER_PAGE, (page + 1) * CARDS_PER_PAGE);
@@ -780,16 +782,34 @@ function App() {
         }
       }
 
-      // ダウンロード
-      const suffix = totalPages > 1 ? `_${page + 1}of${totalPages}` : "";
-      const a = document.createElement("a");
-      a.download = `animelog_${season}${suffix}.png`;
-      a.href = canvas.toDataURL("image/png");
-      a.click();
-      await new Promise(r => setTimeout(r, 300));
+      // PNG blob をバッファとして収集
+      canvases.push({ canvas, page: page + 1 });
     }
 
-    showToast(totalPages > 1 ? `${totalPages}枚の画像を保存しました` : "画像を保存しました", "ok");
+    if (canvases.length === 1) {
+      // 1枚だけならそのままダウンロード
+      const a = document.createElement("a");
+      a.download = `animelog_${season}.png`;
+      a.href = canvases[0].canvas.toDataURL("image/png");
+      a.click();
+      showToast("画像を保存しました", "ok");
+    } else {
+      // 複数枚ならZipにまとめる
+      const zip = new JSZip();
+      const folder = zip.folder(`animelog_${season}`);
+      for (const { canvas, page } of canvases) {
+        const dataUrl = canvas.toDataURL("image/png");
+        const base64  = dataUrl.split(",")[1];
+        folder.file(`page${String(page).padStart(2,"0")}.png`, base64, { base64: true });
+      }
+      const blob = await zip.generateAsync({ type: "blob" });
+      const a = document.createElement("a");
+      a.download = `animelog_${season}.zip`;
+      a.href = URL.createObjectURL(blob);
+      a.click();
+      URL.revokeObjectURL(a.href);
+      showToast(`${canvases.length}枚をZipで保存しました`, "ok");
+    }
   };
 
 

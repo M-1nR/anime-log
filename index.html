@@ -194,21 +194,47 @@ const RATINGS = [
 const RATING_ORDER = {"S+":0,"S":1,"A+":2,"A":3,"B":4,"C":5,"D":6,"":99};
 const SEASON_NAMES = {SPRING:"春",SUMMER:"夏",AUTUMN:"秋",WINTER:"冬"};
 
+// 今の実際の日付から「現在クール」を計算
+function currentSeason() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth() + 1; // 1-12
+  // 1-3月: winter, 4-6月: spring, 7-9月: summer, 10-12月: autumn
+  const name = month <= 3 ? "winter" : month <= 6 ? "spring" : month <= 9 ? "summer" : "autumn";
+  return { year, name };
+}
+
 function buildSeasons() {
   const en = ["spring","summer","autumn","winter"];
   const ja = ["春","夏","秋","冬"];
   const list = [];
-  let year = 2026, si = 3;
-  for (let i = 0; i < 16; i++) {
+  const cur = currentSeason();
+
+  // 上限: 現在クールの1年後（4クール先）
+  let year = cur.year + 1;
+  let si   = en.indexOf(cur.name); // 1年後の同クールから始める
+
+  // 下限: 2024年冬
+  const LIMIT_YEAR = 2023, LIMIT_SI = 3; // winter=3
+
+  while (true) {
     list.push({ value:`${year}-${en[si]}`, label:`${year}年 ${ja[si]}` });
+    // 下限チェック
+    if (year === LIMIT_YEAR && si === LIMIT_SI) break;
     const prevSi = si;
     si--;
     if (si < 0) { si = 3; }
     if (prevSi === 3) { year--; }
+    // 念のため無限ループ防止
+    if (year < LIMIT_YEAR - 1) break;
   }
   return list;
 }
 const SEASONS = buildSeasons();
+const CURRENT_SEASON = (() => {
+  const { year, name } = currentSeason();
+  return `${year}-${name}`;
+})();
 
 async function gqlFetch(token, query, vars = {}) {
   const r = await fetch(GQL, {
@@ -363,7 +389,7 @@ function App() {
   const [user,       setUser]       = useState(null);
   const [tokenState, setTokenState] = useState("idle");
 
-  const [season,  setSeason]  = useState(SEASONS[0].value);
+  const [season,  setSeason]  = useState(CURRENT_SEASON);
   const [items,   setItems]   = useState({});
   const [loading, setLoading] = useState(false);
 

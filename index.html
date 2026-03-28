@@ -777,9 +777,13 @@ function App() {
       return 0;
     });
 
-  const stats = RATINGS.map(r => ({ ...r, count: allItems.filter(x => x.rating === r.id).length })).filter(r => r.count > 0);
-  const ratedCount   = allItems.filter(x => x.rating !== "").length;
-  const watchedCount = allItems.filter(x => x.watched).length;
+  // 現在のメディアタブに絞った集計
+  const mediaFiltered = filterMedia === "all"
+    ? allItems
+    : allItems.filter(x => x.media === filterMedia);
+  const stats = RATINGS.map(r => ({ ...r, count: mediaFiltered.filter(x => x.rating === r.id).length })).filter(r => r.count > 0);
+  const ratedCount   = mediaFiltered.filter(x => x.rating !== "").length;
+  const watchedCount = mediaFiltered.filter(x => x.watched).length;
   const fmtTime = d => d ? `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}` : "";
 
   return html`

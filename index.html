@@ -384,6 +384,49 @@ function AnimeCard({ item, index, onChange }) {
 
 // ── App ────────────────────────────────────────────────────────────────────
 
+// ── 画像取得ユーティリティ（グローバルスコープ） ──────────────────────────
+async function fetchAniListImage(title) {
+  try {
+    const q = `query($t:String){Media(search:$t,type:ANIME){coverImage{large}}}`;
+    const r = await fetch("https://graphql.anilist.co", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: q, variables: { t: title } })
+    });
+    const j = await r.json();
+    return j?.data?.Media?.coverImage?.large ?? null;
+  } catch { return null; }
+}
+
+function loadImgFromUrl(url) {
+  return new Promise(res => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload  = () => res(img);
+    img.onerror = () => res(null);
+    img.src = url;
+  });
+}
+
+// AniListキャッシュ（セッション中共有）
+const anilistCache = {};
+
+async function loadImg(item) {
+  if (!anilistCache[item.id]) {
+    anilistCache[item.id] = await fetchAniListImage(item.title);
+  }
+  const aniUrl = anilistCache[item.id];
+  if (aniUrl) {
+    const img = await loadImgFromUrl(aniUrl);
+    if (img) return img;
+  }
+  if (item.image) {
+    const img = await loadImgFromUrl(item.image);
+    if (img) return img;
+  }
+  return null;
+}
+
 function App() {
   const [tokenInput, setTokenInput] = useState(() => localStorage.getItem(TOKEN_KEY) || "");
   const [token,      setToken]      = useState("");
@@ -582,50 +625,6 @@ function App() {
         this.closePath();
       };
     }
-
-    const fetchAniListImage = async (title) => {
-      try {
-        const q = `query($t:String){Media(search:$t,type:ANIME){coverImage{large}}}`;
-        const r = await fetch("https://graphql.anilist.co", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ query: q, variables: { t: title } })
-        });
-        const j = await r.json();
-        return j?.data?.Media?.coverImage?.large ?? null;
-      } catch { return null; }
-    };
-
-    // AniListのCDN画像はCORSヘッダーがあるのでCanvasに描ける
-    const loadImgFromUrl = (url) => new Promise(res => {
-      const img = new Image();
-      img.crossOrigin = "anonymous";
-      img.onload  = () => res(img);
-      img.onerror = () => res(null);
-      img.src = url;
-    });
-
-    // AniList画像キャッシュ
-    const anilistCache = {};
-
-    const loadImg = async (item) => {
-      // AniListから取得（キャッシュ優先）
-      if (!anilistCache[item.id]) {
-        const url = await fetchAniListImage(item.title);
-        anilistCache[item.id] = url;
-      }
-      const aniUrl = anilistCache[item.id];
-      if (aniUrl) {
-        const img = await loadImgFromUrl(aniUrl);
-        if (img) return img;
-      }
-      // AniList失敗時はAnnict画像を試みる
-      if (item.image) {
-        const img = await loadImgFromUrl(item.image);
-        if (img) return img;
-      }
-      return null;
-    };
 
     const drawRoundRect = (ctx, x, y, w, h, r, fill, stroke) => {
       ctx.beginPath();
@@ -836,22 +835,10 @@ function App() {
 
     // ── Step1: 全作品の画像を並列取得（同時に最大6件） ──
     const fetchOne = async (item) => {
-      if (!anilistCache[item.id]) {
-        anilistCache[item.id] = await fetchAniListImage(item.title);
-      }
-      const aniUrl = anilistCache[item.id];
-      if (aniUrl) {
-        const img = await loadImgFromUrl(aniUrl);
-        if (img) return [item.id, img];
-      }
-      if (item.image) {
-        const img = await loadImgFromUrl(item.image);
-        if (img) return [item.id, img];
-      }
-      return [item.id, null];
+      const img = await loadImg(item);
+      return [item.id, img];
     };
 
-    // 並列数を6に制限してフェッチ
     const imgMap = {};
     const PARALLEL = 6;
     for (let i = 0; i < rated.length; i += PARALLEL) {

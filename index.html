@@ -280,7 +280,7 @@ function workToItem(w, watched = false) {
     image: pickImage(w.image),
     site: w.officialSiteUrl ?? null,
     twitter: w.twitterUsername ?? null,
-    media: w.media ?? "tv",
+    media: (w.media ?? "TV").toLowerCase(),
     rating: "", comment: "", watched,
   };
 }

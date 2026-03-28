@@ -402,7 +402,8 @@ function App() {
   const [hasNextPage, setHasNextPage] = useState(false);
   const [endCursor,   setEndCursor]   = useState(null);
 
-  const [showImport, setShowImport] = useState(false);
+  const [showImport,     setShowImport]     = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
   const [importText, setImportText] = useState("");
 
   const [toast,   setToast]   = useState(null);
@@ -565,6 +566,22 @@ function App() {
     };
 
     // AniList APIでタイトル検索して画像URLを取得
+    // roundRect ポリフィル（古いブラウザ対応）
+    if (!CanvasRenderingContext2D.prototype.roundRect) {
+      CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, r) {
+        this.beginPath();
+        this.moveTo(x+r,y); this.lineTo(x+w-r,y);
+        this.quadraticCurveTo(x+w,y,x+w,y+r);
+        this.lineTo(x+w,y+h-r);
+        this.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+        this.lineTo(x+r,y+h);
+        this.quadraticCurveTo(x,y+h,x,y+h-r);
+        this.lineTo(x,y+r);
+        this.quadraticCurveTo(x,y,x+r,y);
+        this.closePath();
+      };
+    }
+
     const fetchAniListImage = async (title) => {
       try {
         const q = `query($t:String){Media(search:$t,type:ANIME){coverImage{large}}}`;
@@ -777,6 +794,142 @@ function App() {
 
 
 
+  // ── Tier表 画像出力 ────────────────────────────────────────────────────
+  const exportTierImage = async () => {
+    const rated = visible.filter(x => x.rating !== "");
+    if (rated.length === 0) { showToast("評価済みの作品がありません", "err"); return; }
+    setShowExportMenu(false);
+    showToast("Tier表を生成中…", "info", 60000);
+
+    const THUMB = 80;        // サムネイル正方形サイズ
+    const ROW_LABEL_W = 56;  // 左のTierラベル幅
+    const PAD = 16, GAP = 6;
+    const RATING_COLORS = {
+      "S+":{ bg:"#f5c842", text:"#111" },
+      "S" :{ bg:"#f59342", text:"#fff" },
+      "A+":{ bg:"#e05a7a", text:"#fff" },
+      "A" :{ bg:"#c06ab0", text:"#fff" },
+      "B" :{ bg:"#6ab0e0", text:"#fff" },
+      "C" :{ bg:"#60b880", text:"#fff" },
+      "D" :{ bg:"#888",    text:"#ccc" },
+    };
+
+    // 評価済みのみ対象
+    const loadImgTier = async (item) => {
+      if (!anilistCache[item.id]) {
+        const url = await fetchAniListImage(item.title);
+        anilistCache[item.id] = url;
+      }
+      const aniUrl = anilistCache[item.id];
+      if (aniUrl) {
+        const img = await loadImgFromUrl(aniUrl);
+        if (img) return img;
+      }
+      if (item.image) return await loadImgFromUrl(item.image);
+      return null;
+    };
+
+    // 各Tierの作品リスト
+    const tiers = RATINGS.filter(r => rated.some(x => x.rating === r.id));
+    if (tiers.length === 0) { showToast("評価済みの作品がありません", "err"); return; }
+
+    // 行ごとの高さを計算（サムネ数によって複数行になる場合あり）
+    const CANVAS_W = 900;
+    const INNER_W = CANVAS_W - PAD * 2 - ROW_LABEL_W - GAP;
+    const THUMBS_PER_ROW = Math.floor((INNER_W + GAP) / (THUMB + GAP));
+
+    const tierRows = tiers.map(r => {
+      const items = rated.filter(x => x.rating === r.id);
+      const rowCount = Math.ceil(items.length / THUMBS_PER_ROW);
+      const rowH = Math.max(THUMB, rowCount * THUMB + (rowCount - 1) * GAP);
+      return { ...r, items, rowH };
+    });
+
+    const totalH = PAD + tierRows.reduce((s, r) => s + r.rowH + PAD, 0);
+    const canvas = document.createElement("canvas");
+    canvas.width = CANVAS_W; canvas.height = totalH;
+    const ctx = canvas.getContext("2d");
+
+    // 背景
+    ctx.fillStyle = "#f4f5f7";
+    ctx.fillRect(0, 0, CANVAS_W, totalH);
+
+    let curY = PAD;
+    for (const tier of tierRows) {
+      const rowH = tier.rowH + PAD;
+      const rc = RATING_COLORS[tier.id];
+
+      // Tierラベル背景
+      ctx.fillStyle = rc.bg;
+      ctx.beginPath();
+      ctx.roundRect(PAD, curY, ROW_LABEL_W, tier.rowH, 8);
+      ctx.fill();
+
+      // Tierラベル文字
+      ctx.fillStyle = rc.text;
+      ctx.font = `bold ${tier.id.length > 1 ? 22 : 26}px 'Helvetica Neue', Arial, sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(tier.id, PAD + ROW_LABEL_W / 2, curY + tier.rowH / 2);
+      ctx.textAlign = "left";
+      ctx.textBaseline = "alphabetic";
+
+      // サムネイル行背景
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.roundRect(PAD + ROW_LABEL_W + GAP, curY, INNER_W, tier.rowH, 8);
+      ctx.fill();
+      ctx.strokeStyle = "#d0d5dd";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(PAD + ROW_LABEL_W + GAP, curY, INNER_W, tier.rowH, 8);
+      ctx.stroke();
+
+      // サムネイル描画
+      for (let i = 0; i < tier.items.length; i++) {
+        const item = tier.items[i];
+        const col = i % THUMBS_PER_ROW;
+        const row = Math.floor(i / THUMBS_PER_ROW);
+        const tx = PAD + ROW_LABEL_W + GAP + 6 + col * (THUMB + GAP);
+        const ty = curY + 6 + row * (THUMB + GAP);
+
+        const img = await loadImgTier(item);
+        if (img) {
+          ctx.save();
+          ctx.beginPath();
+          ctx.roundRect(tx, ty, THUMB, THUMB, 6);
+          ctx.clip();
+          const iAR = img.width / img.height;
+          let sw, sh, sx, sy;
+          if (iAR > 1) { sh = img.height; sw = sh; sx = (img.width - sw) / 2; sy = 0; }
+          else          { sw = img.width;  sh = sw; sy = (img.height - sh) / 2; sx = 0; }
+          ctx.drawImage(img, sx, sy, sw, sh, tx, ty, THUMB, THUMB);
+          ctx.restore();
+        } else {
+          ctx.fillStyle = "#e8eaf0";
+          ctx.beginPath();
+          ctx.roundRect(tx, ty, THUMB, THUMB, 6);
+          ctx.fill();
+          ctx.fillStyle = "#9098b0";
+          ctx.font = "22px Arial";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText("🎞️", tx + THUMB / 2, ty + THUMB / 2);
+          ctx.textAlign = "left";
+          ctx.textBaseline = "alphabetic";
+        }
+      }
+
+      curY += rowH;
+    }
+
+    const a = document.createElement("a");
+    a.download = "animelog_tier.png";
+    a.href = canvas.toDataURL("image/png");
+    a.click();
+    showToast("Tier表を保存しました", "ok");
+  };
+
   const doImport = () => {
     try {
       const data = JSON.parse(importText);
@@ -865,7 +1018,42 @@ function App() {
           </button>
           <div class="sep"></div>
           <button class="btn btn-ghost btn-sm" onClick=${exportData}>💾 エクスポート</button>
-          <button class="btn btn-ghost btn-sm" onClick=${exportImage}>🖼 画像出力</button>
+          <div style=${{ position:"relative", display:"inline-block" }}>
+            <button class="btn btn-ghost btn-sm"
+              onClick=${() => setShowExportMenu(v => !v)}>
+              🖼 画像出力 ▾
+            </button>
+            ${showExportMenu && html`
+              <div style=${{
+                position:"absolute", top:"100%", left:0, marginTop:"4px",
+                background:"var(--surface)", border:"1.5px solid var(--border)",
+                borderRadius:"10px", boxShadow:"0 4px 16px rgba(0,0,0,.12)",
+                zIndex:100, minWidth:"160px", overflow:"hidden"
+              }}>
+                <button style=${{
+                  display:"block", width:"100%", padding:"10px 16px",
+                  background:"transparent", border:"none", textAlign:"left",
+                  cursor:"pointer", fontSize:"13px", color:"var(--text)",
+                  fontFamily:"'Noto Sans JP',sans-serif", fontWeight:"500"
+                }}
+                  onClick=${() => { setShowExportMenu(false); exportImage(); }}
+                  onMouseEnter=${e => e.target.style.background="var(--surface2)"}
+                  onMouseLeave=${e => e.target.style.background="transparent"}
+                >📋 カード形式</button>
+                <div style=${{ height:"1px", background:"var(--border)", margin:"0 8px" }}></div>
+                <button style=${{
+                  display:"block", width:"100%", padding:"10px 16px",
+                  background:"transparent", border:"none", textAlign:"left",
+                  cursor:"pointer", fontSize:"13px", color:"var(--text)",
+                  fontFamily:"'Noto Sans JP',sans-serif", fontWeight:"500"
+                }}
+                  onClick=${exportTierImage}
+                  onMouseEnter=${e => e.target.style.background="var(--surface2)"}
+                  onMouseLeave=${e => e.target.style.background="transparent"}
+                >🏆 Tier表形式</button>
+              </div>
+            `}
+          </div>
           <button class="btn btn-ghost btn-sm" onClick=${() => setShowImport(true)}>📂 インポート</button>
         </div>
 

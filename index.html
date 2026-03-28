@@ -136,9 +136,8 @@ function buildSeasons() {
   const ja = ["春","夏","秋","冬"];
   const list = [];
   let year = 2026, si = 3;
-  for (let i = 0; i < 12; i++) {
-    list.push({ value:`${year}-${en[si]}`, label:`${year}年 ${ja[si]}クール` });
-    // 冬(3)→秋(2)の切り替えが年をまたぐ境界（2026冬→2025秋）
+  for (let i = 0; i < 16; i++) {
+    list.push({ value:`${year}-${en[si]}`, label:`${year}年 ${ja[si]}` });
     const prevSi = si;
     si--;
     if (si < 0) { si = 3; }
@@ -182,15 +181,22 @@ function pickRestImage(images) {
          images.twitter?.normal_avatar_url || null;
 }
 
-// シーズン作品 + 視聴済みを一括取得（libraryEntriesにもseasonフィルターを適用）
+// 選択クールが属する年の全クールを返す
+function yearSeasons(season) {
+  const year = season.split("-")[0];
+  return [`${year}-winter`, `${year}-spring`, `${year}-summer`, `${year}-autumn`];
+}
+
+// 選択クールの作品を表示しつつ、視聴判定は1年分で行う
 const Q_SEASON_WITH_LIB = `
-query($season:String!){
+query($season:String!, $yearSeasons:[String!]!, $after:String){
   viewer{
-    libraryEntries(states:[WATCHING, WATCHED], seasons:[$season], first:200){
+    libraryEntries(states:[WATCHING, WATCHED], seasons:$yearSeasons, first:200){
       nodes{ work{ annictId } }
     }
   }
-  searchWorks(seasons:[$season],orderBy:{field:WATCHERS_COUNT,direction:DESC},first:50){
+  searchWorks(seasons:[$season], orderBy:{field:WATCHERS_COUNT,direction:DESC}, first:50, after:$after){
+    pageInfo{ hasNextPage endCursor }
     nodes{
       annictId title seasonName seasonYear
       image{ recommendedImageUrl }
@@ -301,7 +307,9 @@ function App() {
   const [filterWatched, setFilterWatched] = useState("all");
   const [sortKey,  setSortKey]  = useState("default");
   const [searchQ,  setSearchQ]  = useState("");
-  const [savedAt,  setSavedAt]  = useState(null);
+  const [savedAt,    setSavedAt]    = useState(null);
+  const [hasNextPage, setHasNextPage] = useState(false);
+  const [endCursor,   setEndCursor]   = useState(null);
 
   const [showImport, setShowImport] = useState(false);
   const [importText, setImportText] = useState("");
@@ -315,10 +323,12 @@ function App() {
     toastRef.current = setTimeout(() => setToast(null), ms);
   };
 
-  // Auto-save
+  // Auto-save: 既存の全クールデータとマージしてから保存
   useEffect(() => {
     if (Object.keys(items).length === 0) return;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(extractSaveable(items)));
+    const existing = loadSaved();
+    const current  = extractSaveable(items);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...existing, ...current }));
     setSavedAt(new Date());
   }, [items]);
 
@@ -351,51 +361,74 @@ function App() {
     showToast("ログアウトしました", "info");
   };
 
+  // 共通: GraphQLレスポンスからアイテムをビルドしてlocalStorageとマージ
+  const buildAndSetItems = async (tok, nodes, libIds, prevItems = {}) => {
+    const seasonWorkIds = new Set(nodes.map(w => String(w.annictId)));
+    const watchedIds = new Set([...libIds].filter(id => seasonWorkIds.has(id)));
+    const fresh = { ...prevItems };
+    nodes.forEach(w => {
+      const id = String(w.annictId);
+      if (!fresh[id]) fresh[id] = workToItem(w, watchedIds.has(id));
+      else fresh[id] = { ...fresh[id], watched: fresh[id].watched || watchedIds.has(id) };
+    });
+    // 画像がない作品をREST APIで補完
+    const noImageIds = Object.values(fresh).filter(x => !x.image).map(x => x.id);
+    if (noImageIds.length > 0) {
+      try {
+        const restData = await restFetch(tok, "works", {
+          filter_ids: noImageIds.join(","), fields: "id,images", per_page: 50,
+        });
+        (restData.works ?? []).forEach(w => {
+          const id = String(w.id);
+          if (fresh[id] && !fresh[id].image) fresh[id] = { ...fresh[id], image: pickRestImage(w.images) };
+        });
+      } catch (_) {}
+    }
+    return fresh;
+  };
+
   const fetchSeason = useCallback(async (tok, s) => {
     if (!tok) return;
     setLoading(true);
+    setHasNextPage(false);
+    setEndCursor(null);
     try {
-      const d = await gqlFetch(tok, Q_SEASON_WITH_LIB, { season: s });
-      // libraryEntriesのID一覧（seasonsフィルターが効かない場合も考慮）
+      const ys = yearSeasons(s);
+      const d = await gqlFetch(tok, Q_SEASON_WITH_LIB, { season: s, yearSeasons: ys, after: null });
       const libIds = new Set(
         (d.viewer?.libraryEntries?.nodes ?? []).map(n => String(n.work.annictId))
       );
       const nodes = d?.searchWorks?.nodes ?? [];
-      // searchWorksで返ってきた作品IDセット
-      const seasonWorkIds = new Set(nodes.map(w => String(w.annictId)));
-      // 両方に含まれるIDだけを視聴済みとする
-      const watchedIds = new Set([...libIds].filter(id => seasonWorkIds.has(id)));
+      const pi    = d?.searchWorks?.pageInfo ?? {};
       const saved = loadSaved();
-      const fresh = {};
-      nodes.forEach(w => {
-        fresh[String(w.annictId)] = workToItem(w, watchedIds.has(String(w.annictId)));
-      });
-
-      // 画像がない作品をREST APIで補完
-      const noImageIds = Object.values(fresh)
-        .filter(x => !x.image)
-        .map(x => x.id);
-      if (noImageIds.length > 0) {
-        try {
-          const restData = await restFetch(tok, "works", {
-            filter_ids: noImageIds.join(","),
-            fields: "id,images",
-            per_page: 50,
-          });
-          (restData.works ?? []).forEach(w => {
-            const id = String(w.id);
-            if (fresh[id] && !fresh[id].image) {
-              fresh[id] = { ...fresh[id], image: pickRestImage(w.images) };
-            }
-          });
-        } catch (_) { /* 画像補完失敗は無視 */ }
-      }
-
+      const fresh = await buildAndSetItems(tok, nodes, libIds);
       setItems(mergeSaved(fresh, saved));
+      setHasNextPage(pi.hasNextPage ?? false);
+      setEndCursor(pi.endCursor ?? null);
       showToast(`${nodes.length} 件読み込みました`, "ok");
     } catch (e) { showToast(e.message, "err"); }
     finally { setLoading(false); }
   }, []);
+
+  const fetchMore = useCallback(async () => {
+    if (!token || !endCursor || loading) return;
+    setLoading(true);
+    try {
+      const ys = yearSeasons(season);
+      const d = await gqlFetch(token, Q_SEASON_WITH_LIB, { season, yearSeasons: ys, after: endCursor });
+      const libIds = new Set(
+        (d.viewer?.libraryEntries?.nodes ?? []).map(n => String(n.work.annictId))
+      );
+      const nodes = d?.searchWorks?.nodes ?? [];
+      const pi    = d?.searchWorks?.pageInfo ?? {};
+      const fresh = await buildAndSetItems(token, nodes, libIds);
+      setItems(prev => ({ ...prev, ...mergeSaved(fresh, loadSaved()) }));
+      setHasNextPage(pi.hasNextPage ?? false);
+      setEndCursor(pi.endCursor ?? null);
+      showToast(`さらに ${nodes.length} 件読み込みました`, "ok");
+    } catch (e) { showToast(e.message, "err"); }
+    finally { setLoading(false); }
+  }, [token, season, endCursor, loading]);
 
   useEffect(() => {
     if (token) { setItems({}); fetchSeason(token, season); }
@@ -573,6 +606,14 @@ function App() {
               onChange=${patch => updateItem(item.id, patch)} />
           `)}
         </div>
+
+        ${hasNextPage && !loading && html`
+          <div style=${{ textAlign:"center", marginTop:"20px" }}>
+            <button class="btn btn-ghost" onClick=${fetchMore}>
+              ⬇ もっと読み込む
+            </button>
+          </div>
+        `}
       `}
 
       ${showImport && html`

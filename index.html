@@ -511,8 +511,10 @@ function App() {
 
   // ── 画像出力（複数ページ対応・感想メモ付き） ────────────────────────────
   const exportImage = async () => {
-    if (visible.length === 0) { showToast("表示中の作品がありません", "err"); return; }
-    showToast("画像を生成中…", "info", 30000);
+    // 評価済みのみ対象
+    const exportTargets = visible.filter(x => x.rating !== "");
+    if (exportTargets.length === 0) { showToast("評価済みの作品がありません", "err"); return; }
+    showToast(`評価済み ${exportTargets.length} 件の画像を生成中…`, "info", 30000);
 
     // カードサイズ定義（横長カード: 左ポスター + 右情報）
     const POSTER_W  = 120;
@@ -611,10 +613,10 @@ function App() {
       return lines;
     };
 
-    const totalPages = Math.ceil(visible.length / CARDS_PER_PAGE);
+    const totalPages = Math.ceil(exportTargets.length / CARDS_PER_PAGE);
 
     for (let page = 0; page < totalPages; page++) {
-      const pageItems = visible.slice(page * CARDS_PER_PAGE, (page + 1) * CARDS_PER_PAGE);
+      const pageItems = exportTargets.slice(page * CARDS_PER_PAGE, (page + 1) * CARDS_PER_PAGE);
       const rows = Math.ceil(pageItems.length / COLS);
       const canvasH = PAD + rows * CARD_H + (rows - 1) * GAP + PAD;
 

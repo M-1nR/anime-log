@@ -272,28 +272,28 @@ function pickRestImage(images) {
 }
 
 // 選択クールが属する年の全クールを返す
-function yearSeasons(season) {
-  const year = season.split("-")[0];
-  return [`${year}-winter`, `${year}-spring`, `${year}-summer`, `${year}-autumn`];
-}
-
-// 選択クール + 年間全クールを取得
-// 表示: 選択クールの作品 + 視聴中の年クールアニメ
+// 選択クールの視聴状態を取得するクエリ
 const Q_SEASON_WITH_LIB = `
-query($season:String!, $yearSeasons:[String!]!, $after:String){
+query($season:String!, $after:String){
   viewer{
-    libraryEntries(states:[WATCHING, WATCHED], seasons:$yearSeasons, first:500){
-      nodes{
-        work{
-          annictId title seasonName seasonYear media
-          image{ recommendedImageUrl }
-          officialSiteUrl twitterUsername
-        }
-      }
+    libraryEntries(states:[WATCHING, WATCHED], seasons:[$season], first:200){
+      nodes{ work{ annictId } }
     }
   }
   searchWorks(seasons:[$season], orderBy:{field:WATCHERS_COUNT,direction:DESC}, first:50, after:$after){
     pageInfo{ hasNextPage endCursor }
+    nodes{
+      annictId title seasonName seasonYear media
+      image{ recommendedImageUrl }
+      officialSiteUrl twitterUsername
+    }
+  }
+}`;
+
+// タイトル検索クエリ（手動追加用）
+const Q_SEARCH_WORKS = `
+query($title:String!){
+  searchWorks(titles:[$title], orderBy:{field:WATCHERS_COUNT,direction:DESC}, first:10){
     nodes{
       annictId title seasonName seasonYear media
       image{ recommendedImageUrl }
@@ -335,10 +335,12 @@ function extractSaveable(items) {
   const existing = loadSaved();
   const out = {};
   for (const id in items) {
-    const { rating, comment } = items[id];
-    // 評価・感想がある場合、または以前に保存されていた場合は必ず書き込む
-    // （以前に保存されていたものを未評価に戻した場合も正しく反映するため）
-    if (rating || comment || existing[id]) out[id] = { rating, comment };
+    const { rating, comment, _manual, title, season, image, site, twitter, media, watched } = items[id];
+    if (rating || comment || existing[id] || _manual) {
+      out[id] = { rating, comment };
+      // 手動追加アイテムは作品情報も保存（再読込時に復元するため）
+      if (_manual) out[id] = { rating, comment, _manual, title, season, image, site, twitter, media, watched };
+    }
   }
   return out;
 }
@@ -529,6 +531,10 @@ function App() {
 
   const [showImport,     setShowImport]     = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const [showAddSearch,  setShowAddSearch]  = useState(false);
+  const [addQuery,       setAddQuery]       = useState("");
+  const [addResults,     setAddResults]     = useState([]);
+  const [addSearching,   setAddSearching]   = useState(false);
   const [importText, setImportText] = useState("");
 
   const [toast,   setToast]   = useState(null);
@@ -611,28 +617,26 @@ function App() {
     setHasNextPage(false);
     setEndCursor(null);
     try {
-      const ys = yearSeasons(s);
-      const d = await gqlFetch(tok, Q_SEASON_WITH_LIB, { season: s, yearSeasons: ys, after: null });
-      const libEntries = d.viewer?.libraryEntries?.nodes ?? [];
-      const libIds = new Set(libEntries.map(n => String(n.work.annictId)));
-
-      // 選択クールの作品
+      const d = await gqlFetch(tok, Q_SEASON_WITH_LIB, { season: s, after: null });
+      const libIds = new Set(
+        (d.viewer?.libraryEntries?.nodes ?? []).map(n => String(n.work.annictId))
+      );
       const nodes = d?.searchWorks?.nodes ?? [];
       const pi    = d?.searchWorks?.pageInfo ?? {};
-      const seasonIds = new Set(nodes.map(w => String(w.annictId)));
-
-      // 視聴中・視聴済みだが選択クールに含まれない作品（年クールアニメ等）
-      const extraNodes = libEntries
-        .map(n => n.work)
-        .filter(w => !seasonIds.has(String(w.annictId)));
-
-      const allNodes = [...nodes, ...extraNodes];
       const saved = loadSaved();
-      const fresh = await buildAndSetItems(tok, allNodes, libIds);
-      setItems(mergeSaved(fresh, saved));
+      const fresh = await buildAndSetItems(tok, nodes, libIds);
+      // 手動追加済みのアイテムを保持（localStorageから復元）
+      const merged = mergeSaved(fresh, saved);
+      // savedにあってfreshにない作品（手動追加分）を復元
+      for (const id in saved) {
+        if (!merged[id] && saved[id]._manual) {
+          merged[id] = saved[id];
+        }
+      }
+      setItems(merged);
       setHasNextPage(pi.hasNextPage ?? false);
       setEndCursor(pi.endCursor ?? null);
-      showToast(`${nodes.length} 件${extraNodes.length > 0 ? ` (+年クール${extraNodes.length}件)` : ""} 読み込みました`, "ok");
+      showToast(`${nodes.length} 件読み込みました`, "ok");
     } catch (e) { showToast(e.message, "err"); }
     finally { setLoading(false); }
   }, []);
@@ -641,8 +645,7 @@ function App() {
     if (!token || !endCursor || loading) return;
     setLoading(true);
     try {
-      const ys = yearSeasons(season);
-      const d = await gqlFetch(token, Q_SEASON_WITH_LIB, { season, yearSeasons: ys, after: endCursor });
+      const d = await gqlFetch(token, Q_SEASON_WITH_LIB, { season, after: endCursor });
       const libIds = new Set(
         (d.viewer?.libraryEntries?.nodes ?? []).map(n => String(n.work.annictId))
       );
@@ -664,6 +667,26 @@ function App() {
 
   const updateItem = (id, patch) =>
     setItems(prev => ({ ...prev, [id]: { ...prev[id], ...patch } }));
+
+  // 手動追加: タイトル検索
+  const doAddSearch = async () => {
+    if (!token || !addQuery.trim()) return;
+    setAddSearching(true);
+    try {
+      const d = await gqlFetch(token, Q_SEARCH_WORKS, { title: addQuery.trim() });
+      setAddResults(d?.searchWorks?.nodes ?? []);
+    } catch (e) { showToast(e.message, "err"); }
+    finally { setAddSearching(false); }
+  };
+
+  // 手動追加: 作品をリストに追加（_manualフラグ付きで保存）
+  const addWorkManually = (w) => {
+    const id = String(w.annictId);
+    if (items[id]) { showToast("既にリストにあります", "info"); return; }
+    const item = { ...workToItem(w, false), _manual: true };
+    setItems(prev => ({ ...prev, [id]: item }));
+    showToast(`「${w.title}」を追加しました`, "ok");
+  };
 
   const exportData = () => {
     const blob = new Blob([JSON.stringify(extractSaveable(items), null, 2)], { type: "application/json" });
@@ -1115,6 +1138,7 @@ function App() {
             📚 視聴状態を再取得
           </button>
           <div class="sep"></div>
+          <button class="btn btn-ghost btn-sm" onClick=${() => setShowAddSearch(true)}>＋ 作品を追加</button>
           <button class="btn btn-ghost btn-sm" onClick=${exportData}>💾 エクスポート</button>
           <div style=${{ position:"relative", display:"inline-block" }}>
             <button class="btn btn-ghost btn-sm"
@@ -1248,6 +1272,59 @@ function App() {
             </button>
           </div>
         `}
+      `}
+
+      ${showAddSearch && html`
+        <div class="overlay" onClick=${() => { setShowAddSearch(false); setAddResults([]); setAddQuery(""); }}>
+          <div class="modal" style=${{ maxWidth:"560px" }} onClick=${e => e.stopPropagation()}>
+            <h3>＋ 作品を手動追加</h3>
+            <p>年クールアニメや季節外の作品をタイトルで検索して追加できます。</p>
+            <div class="row" style=${{ marginBottom:"12px" }}>
+              <input class="inp" placeholder="タイトルを入力…"
+                value=${addQuery}
+                onInput=${e => setAddQuery(e.target.value)}
+                onKeyDown=${e => e.key === "Enter" && doAddSearch()} />
+              <button class="btn btn-gold btn-sm" onClick=${doAddSearch} disabled=${addSearching}>
+                ${addSearching ? "検索中…" : "検索"}
+              </button>
+            </div>
+            <div style=${{ maxHeight:"320px", overflowY:"auto", display:"flex", flexDirection:"column", gap:"8px" }}>
+              ${addResults.length === 0 && !addSearching && addQuery && html`
+                <p style=${{ fontSize:"13px", color:"var(--muted)", textAlign:"center", padding:"20px" }}>見つかりませんでした</p>
+              `}
+              ${addResults.map(w => {
+                const id = String(w.annictId);
+                const already = !!items[id];
+                return html`
+                  <div key=${id} style=${{
+                    display:"flex", alignItems:"center", gap:"10px",
+                    background:"var(--surface2)", borderRadius:"8px", padding:"8px 10px",
+                    border:"1px solid var(--border)"
+                  }}>
+                    ${w.image?.recommendedImageUrl
+                      ? html`<img src=${w.image.recommendedImageUrl} style=${{ width:"40px", height:"56px", objectFit:"cover", borderRadius:"4px", flexShrink:0 }} />`
+                      : html`<div style=${{ width:"40px", height:"56px", background:"var(--surface2)", borderRadius:"4px", flexShrink:0 }}></div>`
+                    }
+                    <div style=${{ flex:1, minWidth:0 }}>
+                      <div style=${{ fontSize:"13px", fontWeight:"700", color:"var(--text)" }}>${w.title}</div>
+                      <div style=${{ fontSize:"11px", color:"var(--muted)", marginTop:"2px" }}>
+                        ${w.seasonYear ? `${w.seasonYear}年${SEASON_NAMES[w.seasonName] ?? ""}` : ""}
+                      </div>
+                    </div>
+                    <button class="btn btn-sm ${already ? "btn-ghost" : "btn-gold"}"
+                      disabled=${already}
+                      onClick=${() => addWorkManually(w)}>
+                      ${already ? "追加済み" : "追加"}
+                    </button>
+                  </div>
+                `;
+              })}
+            </div>
+            <div class="modal-btns">
+              <button class="btn btn-ghost btn-sm" onClick=${() => { setShowAddSearch(false); setAddResults([]); setAddQuery(""); }}>閉じる</button>
+            </div>
+          </div>
+        </div>
       `}
 
       ${showImport && html`

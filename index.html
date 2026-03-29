@@ -277,12 +277,19 @@ function yearSeasons(season) {
   return [`${year}-winter`, `${year}-spring`, `${year}-summer`, `${year}-autumn`];
 }
 
-// 選択クールの作品を表示しつつ、視聴判定は1年分で行う
+// 選択クール + 年間全クールを取得
+// 表示: 選択クールの作品 + 視聴中の年クールアニメ
 const Q_SEASON_WITH_LIB = `
 query($season:String!, $yearSeasons:[String!]!, $after:String){
   viewer{
-    libraryEntries(states:[WATCHING, WATCHED], seasons:$yearSeasons, first:200){
-      nodes{ work{ annictId } }
+    libraryEntries(states:[WATCHING, WATCHED], seasons:$yearSeasons, first:500){
+      nodes{
+        work{
+          annictId title seasonName seasonYear media
+          image{ recommendedImageUrl }
+          officialSiteUrl twitterUsername
+        }
+      }
     }
   }
   searchWorks(seasons:[$season], orderBy:{field:WATCHERS_COUNT,direction:DESC}, first:50, after:$after){
@@ -605,17 +612,26 @@ function App() {
     try {
       const ys = yearSeasons(s);
       const d = await gqlFetch(tok, Q_SEASON_WITH_LIB, { season: s, yearSeasons: ys, after: null });
-      const libIds = new Set(
-        (d.viewer?.libraryEntries?.nodes ?? []).map(n => String(n.work.annictId))
-      );
+      const libEntries = d.viewer?.libraryEntries?.nodes ?? [];
+      const libIds = new Set(libEntries.map(n => String(n.work.annictId)));
+
+      // 選択クールの作品
       const nodes = d?.searchWorks?.nodes ?? [];
       const pi    = d?.searchWorks?.pageInfo ?? {};
+      const seasonIds = new Set(nodes.map(w => String(w.annictId)));
+
+      // 視聴中・視聴済みだが選択クールに含まれない作品（年クールアニメ等）
+      const extraNodes = libEntries
+        .map(n => n.work)
+        .filter(w => !seasonIds.has(String(w.annictId)));
+
+      const allNodes = [...nodes, ...extraNodes];
       const saved = loadSaved();
-      const fresh = await buildAndSetItems(tok, nodes, libIds);
+      const fresh = await buildAndSetItems(tok, allNodes, libIds);
       setItems(mergeSaved(fresh, saved));
       setHasNextPage(pi.hasNextPage ?? false);
       setEndCursor(pi.endCursor ?? null);
-      showToast(`${nodes.length} 件読み込みました`, "ok");
+      showToast(`${nodes.length} 件${extraNodes.length > 0 ? ` (+年クール${extraNodes.length}件)` : ""} 読み込みました`, "ok");
     } catch (e) { showToast(e.message, "err"); }
     finally { setLoading(false); }
   }, []);
@@ -632,6 +648,7 @@ function App() {
       const nodes = d?.searchWorks?.nodes ?? [];
       const pi    = d?.searchWorks?.pageInfo ?? {};
       const fresh = await buildAndSetItems(token, nodes, libIds);
+      // fetchMoreでは追加のsearchWorksのみ（extraNodesは初回fetchで取得済み）
       setItems(prev => ({ ...prev, ...mergeSaved(fresh, loadSaved()) }));
       setHasNextPage(pi.hasNextPage ?? false);
       setEndCursor(pi.endCursor ?? null);

@@ -325,9 +325,15 @@ function loadSaved() {
 }
 function mergeSaved(items, saved) {
   const next = {};
+  // APIから取得した作品に評価・感想をマージ
   for (const id in items) {
-    // watched はAnnictのAPIから取得するためlocalStorageで上書きしない
     next[id] = { ...items[id], ...(saved[id] ? { rating: saved[id].rating ?? "", comment: saved[id].comment ?? "" } : {}) };
+  }
+  // 手動追加アイテム（_manual）をsavedから復元
+  for (const id in saved) {
+    if (saved[id]._manual && !next[id]) {
+      next[id] = { ...saved[id] };
+    }
   }
   return next;
 }
@@ -337,9 +343,12 @@ function extractSaveable(items) {
   for (const id in items) {
     const { rating, comment, _manual, title, season, image, site, twitter, media, watched } = items[id];
     if (rating || comment || existing[id] || _manual) {
-      out[id] = { rating, comment };
-      // 手動追加アイテムは作品情報も保存（再読込時に復元するため）
-      if (_manual) out[id] = { rating, comment, _manual, title, season, image, site, twitter, media, watched };
+      if (_manual) {
+        // 手動追加アイテムは作品情報ごと保存
+        out[id] = { rating, comment, _manual, title, season, image, site, twitter, media, watched };
+      } else {
+        out[id] = { rating, comment };
+      }
     }
   }
   return out;
@@ -625,14 +634,7 @@ function App() {
       const pi    = d?.searchWorks?.pageInfo ?? {};
       const saved = loadSaved();
       const fresh = await buildAndSetItems(tok, nodes, libIds);
-      // 手動追加済みのアイテムを保持（localStorageから復元）
       const merged = mergeSaved(fresh, saved);
-      // savedにあってfreshにない作品（手動追加分）を復元
-      for (const id in saved) {
-        if (!merged[id] && saved[id]._manual) {
-          merged[id] = saved[id];
-        }
-      }
       setItems(merged);
       setHasNextPage(pi.hasNextPage ?? false);
       setEndCursor(pi.endCursor ?? null);

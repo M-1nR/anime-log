@@ -581,7 +581,8 @@ function App() {
   // 共通: GraphQLレスポンスからアイテムをビルドしてlocalStorageとマージ
   const buildAndSetItems = async (tok, nodes, libIds, prevItems = {}) => {
     const seasonWorkIds = new Set(nodes.map(w => String(w.annictId)));
-    const watchedIds = new Set([...libIds].filter(id => seasonWorkIds.has(id)));
+    // libIdsに含まれるもの全てを視聴済みとする（交差を取らない）
+    const watchedIds = libIds;
     const fresh = { ...prevItems };
     nodes.forEach(w => {
       const id = String(w.annictId);

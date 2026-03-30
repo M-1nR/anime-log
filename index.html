@@ -1148,6 +1148,28 @@ function App() {
           </button>
           <div class="sep"></div>
           <button class="btn btn-ghost btn-sm" onClick=${() => setShowAddSearch(true)}>＋ 作品を追加</button>
+          <button class="btn btn-ghost btn-sm" style=${{ color:"var(--err)", borderColor:"rgba(192,57,43,.3)" }}
+            onClick=${() => {
+              if (!confirm("手動追加した作品をリセットしますか？\n（通常のクール作品・評価・感想は削除されません）")) return;
+              // localStorageから_manualアイテムを削除
+              const saved = loadSaved();
+              const cleaned = {};
+              for (const id in saved) {
+                if (!saved[id]._manual) cleaned[id] = saved[id];
+              }
+              localStorage.setItem(STORAGE_KEY, JSON.stringify(cleaned));
+              // itemsからも削除
+              setItems(prev => {
+                const next = {};
+                for (const id in prev) {
+                  if (!prev[id]._manual) next[id] = prev[id];
+                }
+                return next;
+              });
+              showToast("手動追加した作品をリセットしました", "ok");
+            }}>
+            ↺ 追加リセット
+          </button>
           <button class="btn btn-ghost btn-sm" onClick=${exportData}>💾 エクスポート</button>
           <div style=${{ position:"relative", display:"inline-block" }}>
             <button class="btn btn-ghost btn-sm"

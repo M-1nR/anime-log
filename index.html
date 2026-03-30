@@ -276,7 +276,7 @@ function pickRestImage(images) {
 const Q_SEASON_WITH_LIB = `
 query($season:String!, $after:String){
   viewer{
-    libraryEntries(states:[WATCHING, WATCHED], seasons:[$season], first:200){
+    libraryEntries(states:[WATCHING, WATCHED], first:1000){
       nodes{ work{ annictId } }
     }
   }

@@ -364,7 +364,8 @@ function extractSaveable(items) {
 // ── AnimeCard ──────────────────────────────────────────────────────────────
 
 function AnimeCard({ item, index, onChange }) {
-  const ri = RATINGS.find(r => r.id === item.rating);
+  if (!item || !item.id) return null; // 不正なitemは描画しない
+  const ri = RATINGS.find(r => r.id === (item.rating || ""));
   return html`
     <div class="acard" style=${{ animation: `fadeIn .3s ease ${Math.min(index, 20) * 25}ms both` }}>
       <div class="card-top">
@@ -1085,6 +1086,10 @@ function App() {
     .sort((a, b) => {
       if (sortKey === "rating") return (RATING_ORDER[a.rating] ?? 99) - (RATING_ORDER[b.rating] ?? 99);
       if (sortKey === "title")  return a.title.localeCompare(b.title, "ja");
+      // デフォルト: 評価済みを先に（評価順）、未評価はそのまま後ろ
+      const ra = RATING_ORDER[a.rating] ?? 99;
+      const rb = RATING_ORDER[b.rating] ?? 99;
+      if (ra !== rb) return ra - rb;
       return 0;
     });
 
@@ -1150,15 +1155,22 @@ function App() {
           <button class="btn btn-ghost btn-sm" onClick=${() => setShowAddSearch(true)}>＋ 作品を追加</button>
           <button class="btn btn-ghost btn-sm" style=${{ color:"var(--err)", borderColor:"rgba(192,57,43,.3)" }}
             onClick=${() => {
-              if (!confirm("手動追加した作品をリセットしますか？\n（通常のクール作品・評価・感想は削除されません）")) return;
-              // localStorageから_manualアイテムを削除
+              if (!confirm("手動追加した作品をリセットしますか？\n（評価・感想はそのまま保持されます）")) return;
+              // _manualアイテムをlocalStorageから削除（rating/commentは保持）
               const saved = loadSaved();
               const cleaned = {};
               for (const id in saved) {
-                if (!saved[id]._manual) cleaned[id] = saved[id];
+                if (saved[id]._manual) {
+                  // 評価・感想があれば通常アイテムとして残す
+                  if (saved[id].rating || saved[id].comment) {
+                    cleaned[id] = { rating: saved[id].rating ?? "", comment: saved[id].comment ?? "" };
+                  }
+                } else {
+                  cleaned[id] = saved[id];
+                }
               }
               localStorage.setItem(STORAGE_KEY, JSON.stringify(cleaned));
-              // itemsからも削除
+              // itemsから_manualアイテムを除去
               setItems(prev => {
                 const next = {};
                 for (const id in prev) {

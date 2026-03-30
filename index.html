@@ -276,7 +276,7 @@ function pickRestImage(images) {
 const Q_SEASON_WITH_LIB = `
 query($season:String!, $after:String){
   viewer{
-    libraryEntries(states:[WATCHING, WATCHED], first:1000){
+    libraryEntries(states:[WATCHING, WATCHED], first:2000){
       nodes{ work{ annictId } }
     }
   }
@@ -315,7 +315,7 @@ function workToItem(w, watched = false) {
     site: w.officialSiteUrl ?? null,
     twitter: w.twitterUsername ?? null,
     media: (w.media ?? "TV").toLowerCase(),
-    rating: "", comment: "", watched,
+    rating: "", comment: "", watched: watched === true,
   };
 }
 
@@ -333,7 +333,7 @@ function mergeSaved(items, saved) {
       next[id] = { ...items[id], ...s };
     } else {
       // 通常アイテム: watched はAPIから取得、rating/commentのみ復元
-      next[id] = { ...items[id], ...(s ? { rating: s.rating ?? "", comment: s.comment ?? "" } : {}) };
+      next[id] = { ...items[id], ...(s ? { rating: s.rating ?? "", comment: s.comment ?? "" } : {}), watched: items[id].watched === true };
     }
   }
   // APIにない手動追加アイテムをsavedから復元
@@ -386,7 +386,7 @@ function AnimeCard({ item, index, onChange }) {
       <div class="card-bottom">
         <div class="watched-row">
           <label class="toggle-label">
-            <input type="checkbox" checked=${item.watched} onChange=${e => onChange({ watched: e.target.checked })} />
+            <input type="checkbox" checked=${!!item.watched} onChange=${e => onChange({ watched: e.target.checked })} />
             <div class="toggle-box"></div>
             視聴済み
           </label>

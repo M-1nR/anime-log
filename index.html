@@ -689,11 +689,24 @@ function App() {
     finally { setAddSearching(false); }
   };
 
-  // 手動追加: 作品をリストに追加（_manualフラグ付きで保存）
+  // 手動追加: 作品をリストに追加（_manualフラグ付きで即時保存）
   const addWorkManually = (w) => {
     const id = String(w.annictId);
     if (items[id]) { showToast("既にリストにあります", "info"); return; }
-    const item = { ...workToItem(w, false), _manual: true };
+    const item = {
+      id, title: w.title,
+      season: w.seasonYear ? `${w.seasonYear}年${SEASON_NAMES[w.seasonName] ?? ""}` : "",
+      image: w.image?.recommendedImageUrl ?? null,
+      site: w.officialSiteUrl ?? null,
+      twitter: w.twitterUsername ?? null,
+      media: (w.media ?? "TV").toLowerCase(),
+      rating: "", comment: "", watched: false,
+      _manual: true,
+    };
+    // localStorageに即時書き込み（auto-saveのタイミングに依存しない）
+    const existing = loadSaved();
+    existing[id] = { rating: "", comment: "", _manual: true, ...item };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(existing));
     setItems(prev => ({ ...prev, [id]: item }));
     showToast(`「${w.title}」を追加しました`, "ok");
   };

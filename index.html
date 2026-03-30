@@ -327,9 +327,16 @@ function mergeSaved(items, saved) {
   const next = {};
   // APIから取得した作品に評価・感想をマージ
   for (const id in items) {
-    next[id] = { ...items[id], ...(saved[id] ? { rating: saved[id].rating ?? "", comment: saved[id].comment ?? "" } : {}) };
+    const s = saved[id];
+    if (s?._manual) {
+      // 手動追加アイテムはsavedの内容を優先（watched含む全フィールドを復元）
+      next[id] = { ...items[id], ...s };
+    } else {
+      // 通常アイテム: watched はAPIから取得、rating/commentのみ復元
+      next[id] = { ...items[id], ...(s ? { rating: s.rating ?? "", comment: s.comment ?? "" } : {}) };
+    }
   }
-  // 手動追加アイテム（_manual）をsavedから復元
+  // APIにない手動追加アイテムをsavedから復元
   for (const id in saved) {
     if (saved[id]._manual && !next[id]) {
       next[id] = { ...saved[id] };

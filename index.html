@@ -329,34 +329,33 @@ function mergeSaved(items, saved) {
   for (const id in items) {
     const s = saved[id];
     if (s?._manual) {
-      // 手動追加アイテムはsavedの内容を優先（watched含む全フィールドを復元）
-      next[id] = { ...items[id], ...s };
+      // 手動追加アイテムはsavedの内容を優先（watched含む全フィールドを復元、idを保証）
+      next[id] = { ...items[id], ...s, id };
     } else {
       // 通常アイテム: watched はAPIから取得、rating/commentのみ復元
       next[id] = { ...items[id], ...(s ? { rating: s.rating ?? "", comment: s.comment ?? "" } : {}), watched: items[id].watched === true };
     }
   }
-  // APIにない手動追加アイテムをsavedから復元
+  // APIにない手動追加アイテムをsavedから復元（idを保証）
   for (const id in saved) {
     if (saved[id]._manual && !next[id]) {
-      next[id] = { ...saved[id] };
+      next[id] = { ...saved[id], id };
     }
   }
   return next;
 }
 function extractSaveable(items) {
-  const existing = loadSaved();
   const out = {};
   for (const id in items) {
     const { rating, comment, _manual, title, season, image, site, twitter, media, watched } = items[id];
-    if (rating || comment || existing[id] || _manual) {
-      if (_manual) {
-        // 手動追加アイテムは作品情報ごと保存
-        out[id] = { rating, comment, _manual, title, season, image, site, twitter, media, watched };
-      } else {
-        out[id] = { rating, comment };
-      }
+    if (_manual) {
+      // 手動追加アイテムは作品情報ごと保存（idも含める）
+      out[id] = { id, rating: rating ?? "", comment: comment ?? "", _manual: true,
+                  title, season, image, site, twitter, media, watched: watched === true };
+    } else if (rating || comment) {
+      out[id] = { rating, comment };
     }
+    // 評価も感想もない通常アイテムは保存しない（削除を効かせる）
   }
   return out;
 }
@@ -563,12 +562,18 @@ function App() {
     toastRef.current = setTimeout(() => setToast(null), ms);
   };
 
-  // Auto-save: 既存の全クールデータとマージしてから保存
+  // Auto-save: 別クールの保存内容は維持しつつ、現在itemsのキーのみ差し替える
   useEffect(() => {
     if (Object.keys(items).length === 0) return;
     const existing = loadSaved();
     const current  = extractSaveable(items);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...existing, ...current }));
+    // 現在itemsに存在するidは、existingから一旦削除してからcurrentで上書き
+    // → 未評価化・削除したアイテムはcurrentに含まれないので消える
+    // → itemsに含まれない別クールのアイテムはexistingに残る
+    const next = { ...existing };
+    for (const id in items) delete next[id];
+    Object.assign(next, current);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
     setSavedAt(new Date());
   }, [items]);
 

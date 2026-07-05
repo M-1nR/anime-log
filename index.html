@@ -521,8 +521,11 @@ async function loadImg(item) {
   }
   // Annict画像にフォールバック
   if (item.image) {
-    const img = await loadImgFromUrl(item.image);
-    if (img) return img;
+    // 直接読み込みを試し、CORSで失敗したら自ドメインの画像プロキシ経由で再取得
+    const direct = await loadImgFromUrl(item.image);
+    if (direct) return direct;
+    const proxied = await loadImgFromUrl(`/api/img?url=${encodeURIComponent(item.image)}`);
+    if (proxied) return proxied;
   }
   return null;
 }

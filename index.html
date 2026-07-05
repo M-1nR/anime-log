@@ -329,34 +329,33 @@ function mergeSaved(items, saved) {
   for (const id in items) {
     const s = saved[id];
     if (s?._manual) {
-      // 手動追加アイテムはsavedの内容を優先（watched含む全フィールドを復元）
-      next[id] = { ...items[id], ...s };
+      // 手動追加アイテムはsavedの内容を優先（watched含む全フィールドを復元、idを保証）
+      next[id] = { ...items[id], ...s, id };
     } else {
       // 通常アイテム: watched はAPIから取得、rating/commentのみ復元
       next[id] = { ...items[id], ...(s ? { rating: s.rating ?? "", comment: s.comment ?? "" } : {}), watched: items[id].watched === true };
     }
   }
-  // APIにない手動追加アイテムをsavedから復元
+  // APIにない手動追加アイテムをsavedから復元（idを保証）
   for (const id in saved) {
     if (saved[id]._manual && !next[id]) {
-      next[id] = { ...saved[id] };
+      next[id] = { ...saved[id], id };
     }
   }
   return next;
 }
 function extractSaveable(items) {
-  const existing = loadSaved();
   const out = {};
   for (const id in items) {
     const { rating, comment, _manual, title, season, image, site, twitter, media, watched } = items[id];
-    if (rating || comment || existing[id] || _manual) {
-      if (_manual) {
-        // 手動追加アイテムは作品情報ごと保存
-        out[id] = { rating, comment, _manual, title, season, image, site, twitter, media, watched };
-      } else {
-        out[id] = { rating, comment };
-      }
+    if (_manual) {
+      // 手動追加アイテムは作品情報ごと保存（idも含める）
+      out[id] = { id, rating: rating ?? "", comment: comment ?? "", _manual: true,
+                  title, season, image, site, twitter, media, watched: watched === true };
+    } else if (rating || comment) {
+      out[id] = { rating, comment };
     }
+    // 評価も感想もない通常アイテムは保存しない（削除を効かせる）
   }
   return out;
 }
@@ -527,6 +526,36 @@ async function loadImg(item) {
   return null;
 }
 
+// ── サーバー同期（Vercel + Upstash Redis）──────────────────────────────────
+// トークンをキーにユーザーごとのデータを保存/読み込みする
+async function serverLoad(token) {
+  try {
+    const r = await fetch("/api/load", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+    });
+    if (!r.ok) return null;
+    const j = await r.json();
+    return j?.data ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function serverSave(token, data) {
+  try {
+    const r = await fetch("/api/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, data }),
+    });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
 function App() {
   const [tokenInput, setTokenInput] = useState(() => localStorage.getItem(TOKEN_KEY) || "");
   const [token,      setToken]      = useState("");
@@ -536,6 +565,7 @@ function App() {
   const [season,  setSeason]  = useState(CURRENT_SEASON);
   const [items,   setItems]   = useState({});
   const [loading, setLoading] = useState(false);
+  const [sortSnapshot, setSortSnapshot] = useState({}); // id -> 読み込み時点のrating順位
 
   const [filterMedia,   setFilterMedia]   = useState("all");
   const [filterRating,  setFilterRating]  = useState("all");
@@ -556,6 +586,8 @@ function App() {
 
   const [toast,   setToast]   = useState(null);
   const toastRef  = useRef(null);
+  const tokenRef  = useRef("");        // 保存処理から参照する最新トークン
+  const saveTimer = useRef(null);      // サーバー保存のデバウンス用
 
   const showToast = (msg, type = "info", ms = 2800) => {
     if (toastRef.current) clearTimeout(toastRef.current);
@@ -563,13 +595,24 @@ function App() {
     toastRef.current = setTimeout(() => setToast(null), ms);
   };
 
-  // Auto-save: 既存の全クールデータとマージしてから保存
+  // Auto-save: 別クールの保存内容は維持しつつ、現在itemsのキーのみ差し替える
   useEffect(() => {
     if (Object.keys(items).length === 0) return;
     const existing = loadSaved();
     const current  = extractSaveable(items);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...existing, ...current }));
+    const next = { ...existing };
+    for (const id in items) delete next[id];
+    Object.assign(next, current);
+    // localStorageに保存（オフライン・フォールバック）
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
     setSavedAt(new Date());
+    // サーバーにも保存（ログイン中のみ・2秒デバウンス）
+    if (tokenRef.current) {
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      saveTimer.current = setTimeout(() => {
+        serverSave(tokenRef.current, next);
+      }, 2000);
+    }
   }, [items]);
 
   // Auto-login
@@ -582,10 +625,20 @@ function App() {
     try {
       const d = await gqlFetch(tok, Q_ME);
       setToken(tok);
+      tokenRef.current = tok;
       setUser(d.viewer);
       setTokenState("ok");
       localStorage.setItem(TOKEN_KEY, tok);
       if (!silent) showToast(`${d.viewer.name} さん、ようこそ！`, "ok");
+      // サーバーから保存データを読み込み、localStorageとマージ
+      const serverData = await serverLoad(tok);
+      if (serverData && Object.keys(serverData).length > 0) {
+        const local = loadSaved();
+        // サーバー側を優先しつつ、ローカルにしかないキーは残す
+        const merged = { ...local, ...serverData };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+        if (!silent) showToast("サーバーからデータを同期しました", "ok");
+      }
     } catch {
       setTokenState("err");
       if (!silent) showToast("トークンが無効です", "err");
@@ -596,6 +649,7 @@ function App() {
 
   const clearToken = () => {
     setToken(""); setUser(null); setTokenState("idle");
+    tokenRef.current = "";
     setTokenInput(""); setItems({});
     localStorage.removeItem(TOKEN_KEY);
     showToast("ログアウトしました", "info");
@@ -644,6 +698,9 @@ function App() {
       const fresh = await buildAndSetItems(tok, nodes, libIds);
       const merged = mergeSaved(fresh, saved);
       setItems(merged);
+      const snap = {};
+      Object.values(merged).forEach(x => { snap[x.id] = RATING_ORDER[x.rating] ?? 99; });
+      setSortSnapshot(snap);
       setHasNextPage(pi.hasNextPage ?? false);
       setEndCursor(pi.endCursor ?? null);
       showToast(`${nodes.length} 件読み込みました`, "ok");
@@ -1085,9 +1142,9 @@ function App() {
     .sort((a, b) => {
       if (sortKey === "rating") return (RATING_ORDER[a.rating] ?? 99) - (RATING_ORDER[b.rating] ?? 99);
       if (sortKey === "title")  return a.title.localeCompare(b.title, "ja");
-      // デフォルト: 評価済みを先に（評価順）、未評価はそのまま後ろ
-      const ra = RATING_ORDER[a.rating] ?? 99;
-      const rb = RATING_ORDER[b.rating] ?? 99;
+      // デフォルト: 読み込み時点の評価順位で固定（評価変更時に再ソートしない）
+      const ra = sortSnapshot[a.id] ?? 99;
+      const rb = sortSnapshot[b.id] ?? 99;
       if (ra !== rb) return ra - rb;
       return 0;
     });

@@ -557,6 +557,22 @@ async function serverSave(token, data) {
   }
 }
 
+// OGPフォールバック: /api/ogp から画像URLを取得（AniListでも見つからない場合の最終手段）
+const ogpCache = {}; // id -> url | null
+async function fetchOgpImage(id) {
+  if (ogpCache[id] !== undefined) return ogpCache[id];
+  try {
+    const r = await fetch(`/api/ogp?id=${encodeURIComponent(id)}`);
+    if (!r.ok) { ogpCache[id] = null; return null; }
+    const j = await r.json();
+    ogpCache[id] = j?.image ?? null;
+    return ogpCache[id];
+  } catch {
+    ogpCache[id] = null;
+    return null;
+  }
+}
+
 function App() {
   const [tokenInput, setTokenInput] = useState(() => localStorage.getItem(TOKEN_KEY) || "");
   const [token,      setToken]      = useState("");
@@ -695,6 +711,38 @@ function App() {
     return fresh;
   };
 
+  // 画像なし作品の補完: AniList(一括) → OGP(3並列) の順に試す
+  const enrichImages = useCallback(async (targetItems) => {
+    const noImage = Object.values(targetItems).filter(x => !x.image);
+    if (noImage.length === 0) return;
+    // Step1: AniList一括取得（既存のキャッシュ・レート制限対策を流用）
+    await preloadAniListImages(noImage);
+    const updates = {};
+    const stillNull = [];
+    for (const x of noImage) {
+      const url = anilistCache[x.id];
+      if (url) updates[x.id] = url;
+      else stillNull.push(x);
+    }
+    // Step2: OGPフォールバック（3並列）
+    const PAR = 3;
+    for (let i = 0; i < stillNull.length; i += PAR) {
+      const chunk = stillNull.slice(i, i + PAR);
+      const results = await Promise.all(chunk.map(async x => [x.id, await fetchOgpImage(x.id)]));
+      results.forEach(([id, url]) => { if (url) updates[id] = url; });
+    }
+    // 取得できた分だけ画像を反映
+    if (Object.keys(updates).length > 0) {
+      setItems(prev => {
+        const next = { ...prev };
+        for (const id in updates) {
+          if (next[id] && !next[id].image) next[id] = { ...next[id], image: updates[id] };
+        }
+        return next;
+      });
+    }
+  }, []);
+
   const fetchSeason = useCallback(async (tok, s) => {
     if (!tok) return;
     setLoading(true);
@@ -710,6 +758,7 @@ function App() {
       const saved = loadSaved();
       const fresh = await buildAndSetItems(tok, nodes, libIds);
       const merged = mergeSaved(fresh, saved);
+      enrichImages(merged); // 画像なし作品をAniList→OGPの順で非同期補完
       // 手動追加アイテムの視聴状態もAnnictのライブラリと突合して更新
       for (const id in merged) {
         if (merged[id]._manual) {
@@ -739,7 +788,9 @@ function App() {
       const pi    = d?.searchWorks?.pageInfo ?? {};
       const fresh = await buildAndSetItems(token, nodes, libIds);
       // fetchMoreでは追加のsearchWorksのみ（extraNodesは初回fetchで取得済み）
-      setItems(prev => ({ ...prev, ...mergeSaved(fresh, loadSaved()) }));
+      const moreMerged = mergeSaved(fresh, loadSaved());
+      enrichImages(moreMerged);
+      setItems(prev => ({ ...prev, ...moreMerged }));
       setHasNextPage(pi.hasNextPage ?? false);
       setEndCursor(pi.endCursor ?? null);
       showToast(`さらに ${nodes.length} 件読み込みました`, "ok");

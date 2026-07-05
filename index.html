@@ -695,12 +695,13 @@ function App() {
       if (!fresh[id]) fresh[id] = workToItem(w, watchedIds.has(id));
       else fresh[id] = { ...fresh[id], watched: fresh[id].watched || watchedIds.has(id) };
     });
-    // 画像がない作品をREST APIで補完
+    // 画像がない作品をREST APIで補完（per_page上限50に合わせて50件ずつ分割）
     const noImageIds = Object.values(fresh).filter(x => !x.image).map(x => x.id);
-    if (noImageIds.length > 0) {
+    for (let i = 0; i < noImageIds.length; i += 50) {
+      const chunk = noImageIds.slice(i, i + 50);
       try {
         const restData = await restFetch(tok, "works", {
-          filter_ids: noImageIds.join(","), fields: "id,images", per_page: 50,
+          filter_ids: chunk.join(","), fields: "id,images", per_page: 50,
         });
         (restData.works ?? []).forEach(w => {
           const id = String(w.id);

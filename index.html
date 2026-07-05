@@ -280,7 +280,7 @@ query($season:String!, $after:String){
       nodes{ work{ annictId } }
     }
   }
-  searchWorks(seasons:[$season], orderBy:{field:WATCHERS_COUNT,direction:DESC}, first:50, after:$after){
+  searchWorks(seasons:[$season], orderBy:{field:WATCHERS_COUNT,direction:DESC}, first:100, after:$after){
     pageInfo{ hasNextPage endCursor }
     nodes{
       annictId title seasonName seasonYear media
@@ -296,6 +296,7 @@ query($title:String!){
   searchWorks(titles:[$title], orderBy:{field:WATCHERS_COUNT,direction:DESC}, first:10){
     nodes{
       annictId title seasonName seasonYear media
+      viewerStatusState
       image{ recommendedImageUrl }
       officialSiteUrl twitterUsername
     }
@@ -576,13 +577,12 @@ function App() {
   const [hasNextPage, setHasNextPage] = useState(false);
   const [endCursor,   setEndCursor]   = useState(null);
 
-  const [showImport,     setShowImport]     = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const [previewImages,  setPreviewImages]  = useState(null); // [{name, dataUrl}] | null
   const [showAddSearch,  setShowAddSearch]  = useState(false);
   const [addQuery,       setAddQuery]       = useState("");
   const [addResults,     setAddResults]     = useState([]);
   const [addSearching,   setAddSearching]   = useState(false);
-  const [importText, setImportText] = useState("");
 
   const [toast,   setToast]   = useState(null);
   const toastRef  = useRef(null);
@@ -710,6 +710,12 @@ function App() {
       const saved = loadSaved();
       const fresh = await buildAndSetItems(tok, nodes, libIds);
       const merged = mergeSaved(fresh, saved);
+      // 手動追加アイテムの視聴状態もAnnictのライブラリと突合して更新
+      for (const id in merged) {
+        if (merged[id]._manual) {
+          merged[id] = { ...merged[id], watched: libIds.has(id) };
+        }
+      }
       setItems(merged);
       const snap = {};
       Object.values(merged).forEach(x => { snap[x.id] = RATING_ORDER[x.rating] ?? 99; });
@@ -770,7 +776,9 @@ function App() {
       site: w.officialSiteUrl ?? null,
       twitter: w.twitterUsername ?? null,
       media: (w.media ?? "TV").toLowerCase(),
-      rating: "", comment: "", watched: false,
+      rating: "", comment: "",
+      // Annict上のステータス（WATCHING/WATCHED）を視聴済みとして反映
+      watched: w.viewerStatusState === "WATCHING" || w.viewerStatusState === "WATCHED",
       _manual: true,
     };
     // localStorageに即時書き込み（auto-saveのタイミングに依存しない）
@@ -779,13 +787,6 @@ function App() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(existing));
     setItems(prev => ({ ...prev, [id]: item }));
     showToast(`「${w.title}」を追加しました`, "ok");
-  };
-
-  const exportData = () => {
-    const blob = new Blob([JSON.stringify(extractSaveable(items), null, 2)], { type: "application/json" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob); a.download = "animelog_backup.json"; a.click();
-    showToast("JSONをエクスポートしました", "ok");
   };
 
   // ── 画像出力（複数ページ対応・感想メモ付き） ────────────────────────────
@@ -995,16 +996,13 @@ function App() {
       canvases.push({ canvas, page: page + 1 });
     }
 
-    // 複数ページを順番に個別ダウンロード
-    for (const { canvas, page } of canvases) {
+    // プレビューを表示（ダウンロードはユーザーが判断）
+    const images = canvases.map(({ canvas, page }) => {
       const suffix = canvases.length > 1 ? `_${page}` : "";
-      const a = document.createElement("a");
-      a.download = `animelog_${season}${suffix}.png`;
-      a.href = canvas.toDataURL("image/png");
-      a.click();
-      if (canvases.length > 1) await new Promise(r => setTimeout(r, 400));
-    }
-    showToast(canvases.length > 1 ? `${canvases.length}枚の画像を保存しました` : "画像を保存しました", "ok");
+      return { name: `animelog_${season}${suffix}.png`, dataUrl: canvas.toDataURL("image/png") };
+    });
+    setPreviewImages(images);
+    showToast("プレビューを生成しました", "ok");
   };
 
 
@@ -1123,21 +1121,9 @@ function App() {
       curY += rowH;
     }
 
-    const a = document.createElement("a");
-    a.download = "animelog_tier.png";
-    a.href = canvas.toDataURL("image/png");
-    a.click();
-    showToast("Tier表を保存しました", "ok");
-  };
-
-  const doImport = () => {
-    try {
-      const data = JSON.parse(importText);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-      setItems(prev => mergeSaved(prev, data));
-      setShowImport(false); setImportText("");
-      showToast("インポートしました", "ok");
-    } catch { showToast("JSONの形式が正しくありません", "err"); }
+    // プレビューを表示（ダウンロードはユーザーが判断）
+    setPreviewImages([{ name: "animelog_tier.png", dataUrl: canvas.toDataURL("image/png") }]);
+    showToast("プレビューを生成しました", "ok");
   };
 
   const allItems = Object.values(items);
@@ -1266,7 +1252,6 @@ function App() {
             }}>
             ↺ 追加リセット
           </button>
-          <button class="btn btn-ghost btn-sm" onClick=${exportData}>💾 エクスポート</button>
           <div style=${{ position:"relative", display:"inline-block" }}>
             <button class="btn btn-ghost btn-sm"
               onClick=${() => setShowExportMenu(v => !v)}>
@@ -1303,11 +1288,10 @@ function App() {
               </div>
             `}
           </div>
-          <button class="btn btn-ghost btn-sm" onClick=${() => setShowImport(true)}>📂 インポート</button>
         </div>
 
         <div class="save-bar">
-          <span class="save-bar-text">💾 評価・感想はこのブラウザに自動保存されます。別端末に引き継ぐにはエクスポート→インポートを使ってください。</span>
+          <span class="save-bar-text">💾 評価・感想は自動保存され、Annictログインでどの端末からも同期されます。</span>
           ${savedAt && html`<span class="save-indicator">最終保存 ${fmtTime(savedAt)}</span>`}
         </div>
 
@@ -1454,19 +1438,29 @@ function App() {
         </div>
       `}
 
-      ${showImport && html`
-        <div class="overlay" onClick=${() => setShowImport(false)}>
-          <div class="modal" onClick=${e => e.stopPropagation()}>
-            <h3>📂 JSONインポート</h3>
-            <p>エクスポートしたJSONを貼り付けてください。現在の評価・感想に上書きマージします。</p>
-            <textarea
-              placeholder=${'{"12345":{"rating":"S","comment":"面白い","watched":true},...}'}
-              value=${importText}
-              onInput=${e => setImportText(e.target.value)}>
-            </textarea>
+      ${previewImages && html`
+        <div class="overlay" onClick=${() => setPreviewImages(null)}>
+          <div class="modal" style=${{ maxWidth:"720px", maxHeight:"85vh", display:"flex", flexDirection:"column" }} onClick=${e => e.stopPropagation()}>
+            <h3>🖼 画像プレビュー ${previewImages.length > 1 ? `（${previewImages.length}枚）` : ""}</h3>
+            <div style=${{ overflowY:"auto", flex:1, display:"flex", flexDirection:"column", gap:"12px", margin:"12px 0" }}>
+              ${previewImages.map((img, i) => html`
+                <img key=${i} src=${img.dataUrl}
+                  style=${{ width:"100%", borderRadius:"8px", border:"1px solid var(--border)" }} />
+              `)}
+            </div>
             <div class="modal-btns">
-              <button class="btn btn-ghost btn-sm" onClick=${() => setShowImport(false)}>キャンセル</button>
-              <button class="btn btn-gold btn-sm"  onClick=${doImport}>インポート</button>
+              <button class="btn btn-ghost btn-sm" onClick=${() => setPreviewImages(null)}>閉じる</button>
+              <button class="btn btn-gold btn-sm" onClick=${async () => {
+                for (const img of previewImages) {
+                  const a = document.createElement("a");
+                  a.download = img.name;
+                  a.href = img.dataUrl;
+                  a.click();
+                  if (previewImages.length > 1) await new Promise(r => setTimeout(r, 400));
+                }
+                setPreviewImages(null);
+                showToast(previewImages.length > 1 ? `${previewImages.length}枚を保存しました` : "画像を保存しました", "ok");
+              }}>⬇ ダウンロード</button>
             </div>
           </div>
         </div>

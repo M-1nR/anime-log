@@ -615,8 +615,21 @@ function App() {
     }
   }, [items]);
 
-  // Auto-login
+  // Auto-login + OAuthコールバック処理
   useEffect(() => {
+    const hash = window.location.hash;
+    if (hash.startsWith("#annict_token=")) {
+      // OAuthログイン成功: フラグメントからトークンを受け取る
+      const tok = decodeURIComponent(hash.slice("#annict_token=".length));
+      history.replaceState(null, "", window.location.pathname); // URLからトークンを消す
+      tryConnect(tok);
+      return;
+    }
+    if (hash.startsWith("#login_error=")) {
+      history.replaceState(null, "", window.location.pathname);
+      showToast("Annictログインに失敗しました", "err");
+      return;
+    }
     const saved = localStorage.getItem(TOKEN_KEY);
     if (saved) tryConnect(saved, true);
   }, []);
@@ -1177,19 +1190,34 @@ function App() {
         `}
       </div>
 
-      <div class="token-wrap">
-        <label class="field-label">Annict アクセストークン</label>
-        <div class="row">
-          <input class="inp" type="password"
-            placeholder="annict.com/settings/apps から発行したトークンを入力"
-            value=${tokenInput}
-            onInput=${e => setTokenInput(e.target.value)}
-            onKeyDown=${e => e.key === "Enter" && applyToken()} />
-          <button class="btn btn-gold" onClick=${applyToken}>接続</button>
+      ${!token && html`
+        <div class="token-wrap">
+          <label class="field-label">Annictでログイン</label>
+          <a class="btn btn-gold" href="/api/login"
+            style=${{ display:"inline-block", textDecoration:"none", textAlign:"center" }}>
+            Annictでログイン
+          </a>
+          ${tokenState === "err" && html`<div class="err-text">✗ ログインエラー</div>`}
+          <details style=${{ marginTop:"14px" }}>
+            <summary style=${{ fontSize:"12px", color:"var(--muted)", cursor:"pointer" }}>
+              アクセストークンを手動で入力する
+            </summary>
+            <div class="row" style=${{ marginTop:"10px" }}>
+              <input class="inp" type="password"
+                placeholder="annict.com/settings/apps から発行したトークンを入力"
+                value=${tokenInput}
+                onInput=${e => setTokenInput(e.target.value)}
+                onKeyDown=${e => e.key === "Enter" && applyToken()} />
+              <button class="btn btn-gold" onClick=${applyToken}>接続</button>
+            </div>
+          </details>
         </div>
-        ${tokenState === "ok"  && html`<div class="ok-text">✓ 接続済み（次回から自動ログイン）</div>`}
-        ${tokenState === "err" && html`<div class="err-text">✗ トークンエラー</div>`}
-      </div>
+      `}
+      ${token && tokenState === "ok" && html`
+        <div class="token-wrap">
+          <div class="ok-text" style=${{ marginTop:0 }}>✓ ログイン済み（次回から自動ログイン）</div>
+        </div>
+      `}
 
       ${token && html`
         <div class="controls">

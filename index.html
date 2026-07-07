@@ -1087,7 +1087,7 @@ function App() {
     setShowExportMenu(false);
     showToast(`Tier表を生成中… (${rated.length}件)`, "info", 60000);
 
-    const THUMB = 80;
+    const THUMB_W = 160, THUMB_H = 90; // 16:9（OGP画像のアスペクトに合わせる）
     const ROW_LABEL_W = 56;
     const PAD = 16, GAP = 6;
     const RATING_COLORS = {
@@ -1110,12 +1110,12 @@ function App() {
     const tiers = RATINGS.filter(r => rated.some(x => x.rating === r.id));
     const CANVAS_W = 900;
     const INNER_W = CANVAS_W - PAD * 2 - ROW_LABEL_W - GAP;
-    const THUMBS_PER_ROW = Math.floor((INNER_W + GAP) / (THUMB + GAP));
+    const THUMBS_PER_ROW = Math.floor((INNER_W + GAP) / (THUMB_W + GAP));
 
     const tierRows = tiers.map(r => {
       const items = rated.filter(x => x.rating === r.id);
       const rowCount = Math.ceil(items.length / THUMBS_PER_ROW);
-      const rowH = Math.max(THUMB + 12, rowCount * (THUMB + GAP) - GAP + 12);
+      const rowH = Math.max(THUMB_H + 12, rowCount * (THUMB_H + GAP) - GAP + 12);
       return { ...r, items, rowH };
     });
 
@@ -1160,31 +1160,35 @@ function App() {
         const item = tier.items[i];
         const col = i % THUMBS_PER_ROW;
         const row = Math.floor(i / THUMBS_PER_ROW);
-        const tx = PAD + ROW_LABEL_W + GAP + 6 + col * (THUMB + GAP);
-        const ty = curY + 6 + row * (THUMB + GAP);
+        const tx = PAD + ROW_LABEL_W + GAP + 6 + col * (THUMB_W + GAP);
+        const ty = curY + 6 + row * (THUMB_H + GAP);
         const img = imgMap[item.id];
 
         if (img) {
           ctx.save();
           ctx.beginPath();
-          ctx.roundRect(tx, ty, THUMB, THUMB, 6);
+          ctx.roundRect(tx, ty, THUMB_W, THUMB_H, 6);
           ctx.clip();
-          const iAR = img.width / img.height;
-          let sw, sh, sx, sy;
-          if (iAR > 1) { sh = img.height; sw = sh; sx = (img.width - sw) / 2; sy = 0; }
-          else          { sw = img.width;  sh = sw; sy = (img.height - sh) / 2; sx = 0; }
-          ctx.drawImage(img, sx, sy, sw, sh, tx, ty, THUMB, THUMB);
+          // 枠の背景（レターボックス部分）
+          ctx.fillStyle = "#e8eaf0";
+          ctx.fillRect(tx, ty, THUMB_W, THUMB_H);
+          // アスペクト比を保ったまま全体が収まるように描画（contain・見切れなし）
+          const scale = Math.min(THUMB_W / img.width, THUMB_H / img.height);
+          const dw = img.width * scale, dh = img.height * scale;
+          const dx = tx + (THUMB_W - dw) / 2;
+          const dy = ty + (THUMB_H - dh) / 2;
+          ctx.drawImage(img, dx, dy, dw, dh);
           ctx.restore();
         } else {
           ctx.fillStyle = "#e8eaf0";
           ctx.beginPath();
-          ctx.roundRect(tx, ty, THUMB, THUMB, 6);
+          ctx.roundRect(tx, ty, THUMB_W, THUMB_H, 6);
           ctx.fill();
           ctx.fillStyle = "#9098b0";
           ctx.font = "22px Arial";
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
-          ctx.fillText("🎞️", tx + THUMB / 2, ty + THUMB / 2);
+          ctx.fillText("🎞️", tx + THUMB_W / 2, ty + THUMB_H / 2);
           ctx.textAlign = "left";
           ctx.textBaseline = "alphabetic";
         }

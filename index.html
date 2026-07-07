@@ -513,19 +513,28 @@ async function preloadAniListImages(items) {
 }
 
 async function loadImg(item) {
-  // キャッシュがあればそれを使う
-  const aniUrl = anilistCache[item.id];
-  if (aniUrl) {
-    const img = await loadImgFromUrl(aniUrl);
+  // 1. Annictサイトのサムネイル（OGP）を最優先で取得
+  //    imgproxy配信のためCORSヘッダーがなく、必ず自ドメインのプロキシ経由で読み込む
+  const ogpUrl = await fetchOgpImage(item.id);
+  if (ogpUrl) {
+    const img = await loadImgFromUrl(`/api/img?url=${encodeURIComponent(ogpUrl)}`);
     if (img) return img;
   }
-  // Annict画像にフォールバック
+  // 2. Annict APIの画像（直接 → プロキシ経由）
   if (item.image) {
-    // 直接読み込みを試し、CORSで失敗したら自ドメインの画像プロキシ経由で再取得
     const direct = await loadImgFromUrl(item.image);
     if (direct) return direct;
     const proxied = await loadImgFromUrl(`/api/img?url=${encodeURIComponent(item.image)}`);
     if (proxied) return proxied;
+  }
+  // 3. AniList（最終フォールバック）
+  if (anilistCache[item.id] === undefined) {
+    anilistCache[item.id] = await fetchAniListImage(item.title);
+  }
+  const aniUrl = anilistCache[item.id];
+  if (aniUrl) {
+    const img = await loadImgFromUrl(aniUrl);
+    if (img) return img;
   }
   return null;
 }
@@ -719,21 +728,25 @@ function App() {
   const enrichImages = useCallback(async (targetItems) => {
     const noImage = Object.values(targetItems).filter(x => !x.image);
     if (noImage.length === 0) return;
-    // Step1: AniList一括取得（既存のキャッシュ・レート制限対策を流用）
-    await preloadAniListImages(noImage);
+    // Step1: OGP（Annictサイトのサムネイル）を最優先で取得（3並列）
     const updates = {};
     const stillNull = [];
-    for (const x of noImage) {
-      const url = anilistCache[x.id];
-      if (url) updates[x.id] = url;
-      else stillNull.push(x);
-    }
-    // Step2: OGPフォールバック（3並列）
     const PAR = 3;
-    for (let i = 0; i < stillNull.length; i += PAR) {
-      const chunk = stillNull.slice(i, i + PAR);
-      const results = await Promise.all(chunk.map(async x => [x.id, await fetchOgpImage(x.id)]));
-      results.forEach(([id, url]) => { if (url) updates[id] = url; });
+    for (let i = 0; i < noImage.length; i += PAR) {
+      const chunk = noImage.slice(i, i + PAR);
+      const results = await Promise.all(chunk.map(async x => [x, await fetchOgpImage(x.id)]));
+      results.forEach(([x, url]) => {
+        if (url) updates[x.id] = url;
+        else stillNull.push(x);
+      });
+    }
+    // Step2: OGPで取れなかった分のみAniList一括取得
+    if (stillNull.length > 0) {
+      await preloadAniListImages(stillNull);
+      for (const x of stillNull) {
+        const url = anilistCache[x.id];
+        if (url) updates[x.id] = url;
+      }
     }
     // 取得できた分だけ画像を反映
     if (Object.keys(updates).length > 0) {
@@ -850,8 +863,6 @@ function App() {
     const exportTargets = visible.filter(x => x.rating !== "");
     if (exportTargets.length === 0) { showToast("評価済みの作品がありません", "err"); return; }
     showToast(`評価済み ${exportTargets.length} 件の画像を生成中…`, "info", 60000);
-    // AniList一括取得（20件/リクエスト）
-    await preloadAniListImages(exportTargets);
 
     // カードサイズ定義（横長カード: 左ポスター + 右情報）
     const POSTER_W  = 120;
@@ -1068,8 +1079,6 @@ function App() {
     if (rated.length === 0) { showToast("評価済みの作品がありません", "err"); return; }
     setShowExportMenu(false);
     showToast(`Tier表を生成中… (${rated.length}件)`, "info", 60000);
-    // AniList一括取得（20件/リクエスト）
-    await preloadAniListImages(rated);
 
     const THUMB = 80;
     const ROW_LABEL_W = 56;

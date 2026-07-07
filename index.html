@@ -371,7 +371,14 @@ function AnimeCard({ item, index, onChange }) {
       <div class="card-top">
         <div class="card-poster">
           ${item.image
-            ? html`<img src=${item.image} alt=${item.title} />`
+            ? html`<img src=${item.image} alt=${item.title}
+                onError=${async () => {
+                  // リンク切れ画像: OGP（Annictサイトのサムネイル）に差し替え
+                  // それでも失敗したらプレースホルダーに落とす
+                  if (item._imgRetried) { onChange({ image: null }); return; }
+                  const ogp = await fetchOgpImage(item.id);
+                  onChange({ image: (ogp && ogp !== item.image) ? ogp : null, _imgRetried: true });
+                }} />`
             : html`<div class="no-img">🎞️</div>`}
         </div>
         <div class="card-info">

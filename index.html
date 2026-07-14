@@ -139,6 +139,12 @@ input,textarea,select,button{font-family:'Noto Sans JP',sans-serif;}
 .ropt.active{border-color:transparent;}
 
 /* 感想エリア */
+.ctabs{display:flex;gap:4px;align-items:center;flex-wrap:wrap;}
+.ctab-label{font-size:11px;color:var(--muted);font-weight:700;margin-right:2px;}
+.ctab{padding:3px 9px;border-radius:6px;border:1.5px solid var(--border);background:var(--surface);color:var(--text-sub);font-size:11px;cursor:pointer;font-weight:700;transition:all .15s;}
+.ctab:hover{border-color:var(--accent);color:var(--accent);}
+.ctab.active{background:var(--accent-light);color:var(--accent);border-color:var(--accent);}
+.ctab-x{color:var(--err);border-color:rgba(192,57,43,.3);}
 .comment-area{background:var(--surface2);border:1.5px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text);font-size:13px;resize:none;outline:none;width:100%;line-height:1.6;height:68px;transition:border-color .15s,box-shadow .15s;}
 .comment-area:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(26,86,219,.1);}
 .comment-area::placeholder{color:var(--muted);}
@@ -316,7 +322,7 @@ function workToItem(w, watched = false) {
     site: w.officialSiteUrl ?? null,
     twitter: w.twitterUsername ?? null,
     media: (w.media ?? "TV").toLowerCase(),
-    rating: "", comment: "", watched: watched === true,
+    rating: "", comments: [""], watched: watched === true,
   };
 }
 
@@ -324,6 +330,16 @@ function loadSaved() {
   try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}"); }
   catch { return {}; }
 }
+// 旧形式(comment: string)を新形式(comments: string[])へ正規化
+function normalizeComments(x) {
+  if (Array.isArray(x?.comments) && x.comments.length > 0) return x.comments;
+  if (typeof x?.comment === "string" && x.comment !== "") return [x.comment];
+  return [""];
+}
+function hasAnyComment(comments) {
+  return (comments ?? []).some(c => (c ?? "").trim() !== "");
+}
+
 function mergeSaved(items, saved) {
   const next = {};
   // APIから取得した作品に評価・感想をマージ
@@ -331,16 +347,16 @@ function mergeSaved(items, saved) {
     const s = saved[id];
     if (s?._manual) {
       // 手動追加アイテムはsavedの内容を優先（watched含む全フィールドを復元、idを保証）
-      next[id] = { ...items[id], ...s, id };
+      next[id] = { ...items[id], ...s, id, comments: normalizeComments(s) };
     } else {
       // 通常アイテム: watched はAPIから取得、rating/commentのみ復元
-      next[id] = { ...items[id], ...(s ? { rating: s.rating ?? "", comment: s.comment ?? "" } : {}), watched: items[id].watched === true };
+      next[id] = { ...items[id], ...(s ? { rating: s.rating ?? "", comments: normalizeComments(s) } : {}), watched: items[id].watched === true };
     }
   }
   // APIにない手動追加アイテムをsavedから復元（idを保証）
   for (const id in saved) {
     if (saved[id]._manual && !next[id]) {
-      next[id] = { ...saved[id], id };
+      next[id] = { ...saved[id], id, comments: normalizeComments(saved[id]) };
     }
   }
   return next;
@@ -348,13 +364,13 @@ function mergeSaved(items, saved) {
 function extractSaveable(items) {
   const out = {};
   for (const id in items) {
-    const { rating, comment, _manual, title, season, image, site, twitter, media, watched } = items[id];
+    const { rating, comments, _manual, title, season, image, site, twitter, media, watched } = items[id];
     if (_manual) {
       // 手動追加アイテムは作品情報ごと保存（idも含める）
-      out[id] = { id, rating: rating ?? "", comment: comment ?? "", _manual: true,
+      out[id] = { id, rating: rating ?? "", comments: comments ?? [""], _manual: true,
                   title, season, image, site, twitter, media, watched: watched === true };
-    } else if (rating || comment) {
-      out[id] = { rating, comment };
+    } else if (rating || hasAnyComment(comments)) {
+      out[id] = { rating, comments };
     }
     // 評価も感想もない通常アイテムは保存しない（削除を効かせる）
   }
@@ -365,6 +381,7 @@ function extractSaveable(items) {
 
 function AnimeCard({ item, index, onChange }) {
   if (!item || !item.id) return null; // 不正なitemは描画しない
+  const [ci, setCi] = useState(0); // 選択中の感想スロット
   const ri = RATINGS.find(r => r.id === (item.rating || ""));
   return html`
     <div class="acard" style=${{ animation: `fadeIn .3s ease ${Math.min(index, 20) * 25}ms both` }}>
@@ -409,10 +426,38 @@ function AnimeCard({ item, index, onChange }) {
             </button>
           `)}
         </div>
-        <textarea class="comment-area" placeholder="感想・メモ…"
-          value=${item.comment}
-          onChange=${e => onChange({ comment: e.target.value })}>
-        </textarea>
+        ${(() => {
+          const comments = (item.comments && item.comments.length > 0) ? item.comments : [""];
+          const idx = Math.min(ci, comments.length - 1);
+          const setComment = (text) => {
+            const next = comments.slice();
+            next[idx] = text;
+            onChange({ comments: next });
+          };
+          return html`
+            <div class="ctabs">
+              <span class="ctab-label">感想</span>
+              ${comments.map((_, i) => html`
+                <button key=${i} class=${`ctab${i === idx ? " active" : ""}`}
+                  onClick=${() => setCi(i)}>${i + 1}</button>
+              `)}
+              <button class="ctab" title="感想スロットを追加（年間アニメのクール別感想などに）"
+                onClick=${() => { onChange({ comments: [...comments, ""] }); setCi(comments.length); }}>＋</button>
+              ${comments.length > 1 && html`
+                <button class="ctab ctab-x" title="このスロットを削除"
+                  onClick=${() => {
+                    const next = comments.filter((_, i) => i !== idx);
+                    onChange({ comments: next });
+                    setCi(Math.max(0, idx - 1));
+                  }}>✕</button>
+              `}
+            </div>
+            <textarea class="comment-area" placeholder=${comments.length > 1 ? `感想 ${idx + 1}…` : "感想・メモ…"}
+              value=${comments[idx] ?? ""}
+              onChange=${e => setComment(e.target.value)}>
+            </textarea>
+          `;
+        })()}
       </div>
     </div>
   `;
@@ -851,14 +896,14 @@ function App() {
       site: w.officialSiteUrl ?? null,
       twitter: w.twitterUsername ?? null,
       media: (w.media ?? "TV").toLowerCase(),
-      rating: "", comment: "",
+      rating: "", comments: [""],
       // Annict上のステータス（WATCHING/WATCHED）を視聴済みとして反映
       watched: w.viewerStatusState === "WATCHING" || w.viewerStatusState === "WATCHED",
       _manual: true,
     };
     // localStorageに即時書き込み（auto-saveのタイミングに依存しない）
     const existing = loadSaved();
-    existing[id] = { rating: "", comment: "", _manual: true, ...item };
+    existing[id] = { rating: "", comments: [""], _manual: true, ...item };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(existing));
     setItems(prev => ({ ...prev, [id]: item }));
     showToast(`「${w.title}」を追加しました`, "ok");
@@ -1051,10 +1096,14 @@ function App() {
         ctx.stroke();
 
         // 感想メモ
-        if (item.comment && item.comment.trim()) {
+        const filledComments = (item.comments ?? []).filter(c => c && c.trim());
+        const joinedComment = filledComments.length > 1
+          ? filledComments.map((c, i) => `${"①②③④⑤⑥⑦⑧⑨⑩"[i] ?? `(${i + 1})`}${c.trim()}`).join(" ")
+          : (filledComments[0] ?? "").trim();
+        if (joinedComment) {
           ctx.fillStyle = "#1a1d24";
           ctx.font = "11px 'Helvetica Neue', Arial, sans-serif";
-          const commentLines = wrapLines(ctx, item.comment.trim(), iw, 4);
+          const commentLines = wrapLines(ctx, joinedComment, iw, 4);
           commentLines.forEach((line, li) => {
             ctx.fillText(line, ix, cy + 122 + li * 14, iw);
           });
@@ -1315,8 +1364,9 @@ function App() {
               for (const id in saved) {
                 if (saved[id]._manual) {
                   // 評価・感想があれば通常アイテムとして残す
-                  if (saved[id].rating || saved[id].comment) {
-                    cleaned[id] = { rating: saved[id].rating ?? "", comment: saved[id].comment ?? "" };
+                  const cms = normalizeComments(saved[id]);
+                  if (saved[id].rating || hasAnyComment(cms)) {
+                    cleaned[id] = { rating: saved[id].rating ?? "", comments: cms };
                   }
                 } else {
                   cleaned[id] = saved[id];

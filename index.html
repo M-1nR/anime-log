@@ -322,7 +322,7 @@ function workToItem(w, watched = false) {
     site: w.officialSiteUrl ?? null,
     twitter: w.twitterUsername ?? null,
     media: (w.media ?? "TV").toLowerCase(),
-    rating: "", comments: [""], watched: watched === true,
+    ratings: [""], comments: [""], watched: watched === true,
   };
 }
 
@@ -330,14 +330,29 @@ function loadSaved() {
   try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}"); }
   catch { return {}; }
 }
-// 旧形式(comment: string)を新形式(comments: string[])へ正規化
-function normalizeComments(x) {
-  if (Array.isArray(x?.comments) && x.comments.length > 0) return x.comments;
-  if (typeof x?.comment === "string" && x.comment !== "") return [x.comment];
-  return [""];
+// 旧形式(comment: string / rating: string)を新形式(comments/ratings: string[])へ正規化
+// クールごとのスロットとして comments と ratings を同じ長さに揃える
+function normalizeSlots(x) {
+  const comments = Array.isArray(x?.comments) && x.comments.length > 0
+    ? x.comments.slice()
+    : (typeof x?.comment === "string" && x.comment !== "" ? [x.comment] : [""]);
+  const ratings = Array.isArray(x?.ratings) && x.ratings.length > 0
+    ? x.ratings.slice()
+    : (typeof x?.rating === "string" && x.rating !== "" ? [x.rating] : [""]);
+  while (ratings.length < comments.length) ratings.push("");
+  ratings.length = comments.length;
+  return { comments, ratings };
 }
 function hasAnyComment(comments) {
   return (comments ?? []).some(c => (c ?? "").trim() !== "");
+}
+function hasAnyRating(ratings) {
+  return (ratings ?? []).some(r => (r ?? "") !== "");
+}
+// カード代表評価: 最も新しいクール（スロット配列の末尾）の評価を使う
+function repRating(item) {
+  const ratings = item?.ratings ?? [];
+  return ratings.length > 0 ? (ratings[ratings.length - 1] ?? "") : "";
 }
 
 function mergeSaved(items, saved) {
@@ -347,16 +362,16 @@ function mergeSaved(items, saved) {
     const s = saved[id];
     if (s?._manual) {
       // 手動追加アイテムはsavedの内容を優先（watched含む全フィールドを復元、idを保証）
-      next[id] = { ...items[id], ...s, id, comments: normalizeComments(s) };
+      next[id] = { ...items[id], ...s, id, ...normalizeSlots(s) };
     } else {
       // 通常アイテム: watched はAPIから取得、rating/commentのみ復元
-      next[id] = { ...items[id], ...(s ? { rating: s.rating ?? "", comments: normalizeComments(s) } : {}), watched: items[id].watched === true };
+      next[id] = { ...items[id], ...(s ? normalizeSlots(s) : {}), watched: items[id].watched === true };
     }
   }
   // APIにない手動追加アイテムをsavedから復元（idを保証）
   for (const id in saved) {
     if (saved[id]._manual && !next[id]) {
-      next[id] = { ...saved[id], id, comments: normalizeComments(saved[id]) };
+      next[id] = { ...saved[id], id, ...normalizeSlots(saved[id]) };
     }
   }
   return next;
@@ -364,13 +379,13 @@ function mergeSaved(items, saved) {
 function extractSaveable(items) {
   const out = {};
   for (const id in items) {
-    const { rating, comments, _manual, title, season, image, site, twitter, media, watched } = items[id];
+    const { ratings, comments, _manual, title, season, image, site, twitter, media, watched } = items[id];
     if (_manual) {
       // 手動追加アイテムは作品情報ごと保存（idも含める）
-      out[id] = { id, rating: rating ?? "", comments: comments ?? [""], _manual: true,
+      out[id] = { id, ratings: ratings ?? [""], comments: comments ?? [""], _manual: true,
                   title, season, image, site, twitter, media, watched: watched === true };
-    } else if (rating || hasAnyComment(comments)) {
-      out[id] = { rating, comments };
+    } else if (hasAnyRating(ratings) || hasAnyComment(comments)) {
+      out[id] = { ratings, comments };
     }
     // 評価も感想もない通常アイテムは保存しない（削除を効かせる）
   }
@@ -381,8 +396,23 @@ function extractSaveable(items) {
 
 function AnimeCard({ item, index, onChange }) {
   if (!item || !item.id) return null; // 不正なitemは描画しない
-  const [ci, setCi] = useState(0); // 選択中の感想スロット
-  const ri = RATINGS.find(r => r.id === (item.rating || ""));
+  const [ci, setCi] = useState(0); // 選択中の感想/評価スロット
+  const comments = (item.comments && item.comments.length > 0) ? item.comments : [""];
+  const ratings  = (item.ratings  && item.ratings.length  > 0) ? item.ratings  : [""];
+  const idx = Math.min(ci, comments.length - 1);
+  const curRating = ratings[idx] ?? "";
+  const ri = RATINGS.find(r => r.id === (repRating(item) || "")); // バッジは最新クールの評価を代表表示
+  const setComment = (text) => {
+    const next = comments.slice();
+    next[idx] = text;
+    onChange({ comments: next });
+  };
+  const setRating = (val) => {
+    const next = ratings.slice();
+    while (next.length < comments.length) next.push("");
+    next[idx] = val;
+    onChange({ ratings: next });
+  };
   return html`
     <div class="acard" style=${{ animation: `fadeIn .3s ease ${Math.min(index, 20) * 25}ms both` }}>
       <div class="card-top">
@@ -419,45 +449,38 @@ function AnimeCard({ item, index, onChange }) {
         <div class="rating-row">
           ${RATINGS.map(r => html`
             <button key=${r.id}
-              class=${`ropt${item.rating === r.id ? " active" : ""}`}
-              style=${item.rating === r.id ? { background: r.bg, color: r.text } : {}}
-              onClick=${() => onChange({ rating: item.rating === r.id ? "" : r.id })}>
+              class=${`ropt${curRating === r.id ? " active" : ""}`}
+              style=${curRating === r.id ? { background: r.bg, color: r.text } : {}}
+              onClick=${() => setRating(curRating === r.id ? "" : r.id)}>
               ${r.label}
             </button>
           `)}
         </div>
-        ${(() => {
-          const comments = (item.comments && item.comments.length > 0) ? item.comments : [""];
-          const idx = Math.min(ci, comments.length - 1);
-          const setComment = (text) => {
-            const next = comments.slice();
-            next[idx] = text;
-            onChange({ comments: next });
-          };
-          return html`
-            <div class="ctabs">
-              <span class="ctab-label">感想</span>
-              ${comments.map((_, i) => html`
-                <button key=${i} class=${`ctab${i === idx ? " active" : ""}`}
-                  onClick=${() => setCi(i)}>${i + 1}</button>
-              `)}
-              <button class="ctab" title="感想スロットを追加（年間アニメのクール別感想などに）"
-                onClick=${() => { onChange({ comments: [...comments, ""] }); setCi(comments.length); }}>＋</button>
-              ${comments.length > 1 && html`
-                <button class="ctab ctab-x" title="このスロットを削除"
-                  onClick=${() => {
-                    const next = comments.filter((_, i) => i !== idx);
-                    onChange({ comments: next });
-                    setCi(Math.max(0, idx - 1));
-                  }}>✕</button>
-              `}
-            </div>
-            <textarea class="comment-area" placeholder=${comments.length > 1 ? `感想 ${idx + 1}…` : "感想・メモ…"}
-              value=${comments[idx] ?? ""}
-              onChange=${e => setComment(e.target.value)}>
-            </textarea>
-          `;
-        })()}
+        <div class="ctabs">
+          <span class="ctab-label">感想</span>
+          ${comments.map((_, i) => html`
+            <button key=${i} class=${`ctab${i === idx ? " active" : ""}`}
+              onClick=${() => setCi(i)}>${i + 1}</button>
+          `)}
+          <button class="ctab" title="感想スロットを追加（年間アニメのクール別感想・評価などに）"
+            onClick=${() => {
+              onChange({ comments: [...comments, ""], ratings: [...ratings, ""] });
+              setCi(comments.length);
+            }}>＋</button>
+          ${comments.length > 1 && html`
+            <button class="ctab ctab-x" title="このスロットを削除"
+              onClick=${() => {
+                const nextComments = comments.filter((_, i) => i !== idx);
+                const nextRatings  = ratings.filter((_, i) => i !== idx);
+                onChange({ comments: nextComments, ratings: nextRatings });
+                setCi(Math.max(0, idx - 1));
+              }}>✕</button>
+          `}
+        </div>
+        <textarea class="comment-area" placeholder=${comments.length > 1 ? `感想 ${idx + 1}…` : "感想・メモ…"}
+          value=${comments[idx] ?? ""}
+          onChange=${e => setComment(e.target.value)}>
+        </textarea>
       </div>
     </div>
   `;
@@ -836,7 +859,7 @@ function App() {
       }
       setItems(merged);
       const snap = {};
-      Object.values(merged).forEach(x => { snap[x.id] = RATING_ORDER[x.rating] ?? 99; });
+      Object.values(merged).forEach(x => { snap[x.id] = RATING_ORDER[repRating(x)] ?? 99; });
       setSortSnapshot(snap);
       setHasNextPage(pi.hasNextPage ?? false);
       setEndCursor(pi.endCursor ?? null);
@@ -896,14 +919,14 @@ function App() {
       site: w.officialSiteUrl ?? null,
       twitter: w.twitterUsername ?? null,
       media: (w.media ?? "TV").toLowerCase(),
-      rating: "", comments: [""],
+      ratings: [""], comments: [""],
       // Annict上のステータス（WATCHING/WATCHED）を視聴済みとして反映
       watched: w.viewerStatusState === "WATCHING" || w.viewerStatusState === "WATCHED",
       _manual: true,
     };
     // localStorageに即時書き込み（auto-saveのタイミングに依存しない）
     const existing = loadSaved();
-    existing[id] = { rating: "", comments: [""], _manual: true, ...item };
+    existing[id] = { ratings: [""], comments: [""], _manual: true, ...item };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(existing));
     setItems(prev => ({ ...prev, [id]: item }));
     showToast(`「${w.title}」を追加しました`, "ok");
@@ -912,7 +935,7 @@ function App() {
   // ── 画像出力（複数ページ対応・感想メモ付き） ────────────────────────────
   const exportImage = async () => {
     // 評価済みのみ対象
-    const exportTargets = visible.filter(x => x.rating !== "");
+    const exportTargets = visible.filter(x => repRating(x) !== "");
     if (exportTargets.length === 0) { showToast("評価済みの作品がありません", "err"); return; }
     showToast(`評価済み ${exportTargets.length} 件の画像を生成中…`, "info", 60000);
 
@@ -1075,15 +1098,16 @@ function App() {
           ctx.fillText(line, ix, cy + 34 + li * 18, iw);
         });
 
-        // 評価バッジ
-        if (item.rating && RATING_MAP[item.rating]) {
-          const rc = RATING_MAP[item.rating];
+        // 評価バッジ（最も新しいクールの評価を代表表示）
+        const itemRating = repRating(item);
+        if (itemRating && RATING_MAP[itemRating]) {
+          const rc = RATING_MAP[itemRating];
           const BW = 40, BH = 24, BY = cy + 74;
           drawRoundRect(ctx, ix, BY, BW, BH, 5, rc.bg, null);
           ctx.fillStyle = rc.text;
           ctx.font = "bold 13px 'Helvetica Neue', Arial, sans-serif";
           ctx.textAlign = "center";
-          ctx.fillText(item.rating, ix + BW / 2, BY + 16);
+          ctx.fillText(itemRating, ix + BW / 2, BY + 16);
           ctx.textAlign = "left";
         }
 
@@ -1131,7 +1155,7 @@ function App() {
 
   // ── Tier表 画像出力 ────────────────────────────────────────────────────
   const exportTierImage = async () => {
-    const rated = visible.filter(x => x.rating !== "");
+    const rated = visible.filter(x => repRating(x) !== "");
     if (rated.length === 0) { showToast("評価済みの作品がありません", "err"); return; }
     setShowExportMenu(false);
     showToast(`Tier表を生成中… (${rated.length}件)`, "info", 60000);
@@ -1156,14 +1180,14 @@ function App() {
     }));
 
     // ── Step2: レイアウト計算（各画像のアスペクト比で幅を決め、左詰めフロー配置）──
-    const tiers = RATINGS.filter(r => rated.some(x => x.rating === r.id));
+    const tiers = RATINGS.filter(r => rated.some(x => repRating(x) === r.id));
     const CANVAS_W = 900;
     const INNER_W = CANVAS_W - PAD * 2 - ROW_LABEL_W - GAP;
     const FLOW_W = INNER_W - 12; // 内側余白（左右6px）を除いた配置可能幅
     const MIN_W = 60, MAX_W = 240, PLACEHOLDER_W = 120;
 
     const tierRows = tiers.map(r => {
-      const items = rated.filter(x => x.rating === r.id);
+      const items = rated.filter(x => repRating(x) === r.id);
       const placed = [];
       let cx = 0, line = 0;
       for (const item of items) {
@@ -1263,15 +1287,15 @@ function App() {
     .filter(x => {
       if (filterMedia === "tv"    && x.media !== "tv")    return false;
       if (filterMedia === "movie" && x.media !== "movie") return false;
-      if (filterRating === "unrated" && x.rating !== "") return false;
-      if (filterRating !== "all" && filterRating !== "unrated" && x.rating !== filterRating) return false;
+      if (filterRating === "unrated" && repRating(x) !== "") return false;
+      if (filterRating !== "all" && filterRating !== "unrated" && repRating(x) !== filterRating) return false;
       if (filterWatched === "watched"   && !x.watched) return false;
       if (filterWatched === "unwatched" &&  x.watched) return false;
       if (searchQ.trim() && !x.title.toLowerCase().includes(searchQ.trim().toLowerCase())) return false;
       return true;
     })
     .sort((a, b) => {
-      if (sortKey === "rating") return (RATING_ORDER[a.rating] ?? 99) - (RATING_ORDER[b.rating] ?? 99);
+      if (sortKey === "rating") return (RATING_ORDER[repRating(a)] ?? 99) - (RATING_ORDER[repRating(b)] ?? 99);
       if (sortKey === "title")  return a.title.localeCompare(b.title, "ja");
       // デフォルト: 読み込み時点の評価順位で固定（評価変更時に再ソートしない）
       const ra = sortSnapshot[a.id] ?? 99;
@@ -1284,8 +1308,8 @@ function App() {
   const mediaFiltered = filterMedia === "all"
     ? allItems
     : allItems.filter(x => x.media === filterMedia);
-  const stats = RATINGS.map(r => ({ ...r, count: mediaFiltered.filter(x => x.rating === r.id).length })).filter(r => r.count > 0);
-  const ratedCount   = mediaFiltered.filter(x => x.rating !== "").length;
+  const stats = RATINGS.map(r => ({ ...r, count: mediaFiltered.filter(x => repRating(x) === r.id).length })).filter(r => r.count > 0);
+  const ratedCount   = mediaFiltered.filter(x => repRating(x) !== "").length;
   const watchedCount = mediaFiltered.filter(x => x.watched).length;
   const fmtTime = d => d ? `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}` : "";
 
@@ -1364,9 +1388,9 @@ function App() {
               for (const id in saved) {
                 if (saved[id]._manual) {
                   // 評価・感想があれば通常アイテムとして残す
-                  const cms = normalizeComments(saved[id]);
-                  if (saved[id].rating || hasAnyComment(cms)) {
-                    cleaned[id] = { rating: saved[id].rating ?? "", comments: cms };
+                  const { comments: cms, ratings: rts } = normalizeSlots(saved[id]);
+                  if (hasAnyRating(rts) || hasAnyComment(cms)) {
+                    cleaned[id] = { ratings: rts, comments: cms };
                   }
                 } else {
                   cleaned[id] = saved[id];

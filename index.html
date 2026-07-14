@@ -355,7 +355,7 @@ function repRating(item) {
   return ratings.length > 0 ? (ratings[ratings.length - 1] ?? "") : "";
 }
 
-function mergeSaved(items, saved) {
+function mergeSaved(items, saved, currentSeason) {
   const next = {};
   // APIから取得した作品に評価・感想をマージ
   for (const id in items) {
@@ -369,9 +369,14 @@ function mergeSaved(items, saved) {
     }
   }
   // APIにない手動追加アイテムをsavedから復元（idを保証）
+  // 追加時のクールを記録したアイテムは、そのクールを開いている時だけ復元する
+  // （記録がない旧データは互換のため常に復元＝従来通り全クールに表示）
   for (const id in saved) {
     if (saved[id]._manual && !next[id]) {
-      next[id] = { ...saved[id], id, ...normalizeSlots(saved[id]) };
+      const addedSeason = saved[id].addedSeason;
+      if (addedSeason == null || addedSeason === currentSeason) {
+        next[id] = { ...saved[id], id, ...normalizeSlots(saved[id]) };
+      }
     }
   }
   return next;
@@ -379,10 +384,10 @@ function mergeSaved(items, saved) {
 function extractSaveable(items) {
   const out = {};
   for (const id in items) {
-    const { ratings, comments, _manual, title, season, image, site, twitter, media, watched } = items[id];
+    const { ratings, comments, _manual, title, season, image, site, twitter, media, watched, addedSeason } = items[id];
     if (_manual) {
       // 手動追加アイテムは作品情報ごと保存（idも含める）
-      out[id] = { id, ratings: ratings ?? [""], comments: comments ?? [""], _manual: true,
+      out[id] = { id, ratings: ratings ?? [""], comments: comments ?? [""], _manual: true, addedSeason,
                   title, season, image, site, twitter, media, watched: watched === true };
     } else if (hasAnyRating(ratings) || hasAnyComment(comments)) {
       out[id] = { ratings, comments };
@@ -849,7 +854,7 @@ function App() {
       const pi    = d?.searchWorks?.pageInfo ?? {};
       const saved = loadSaved();
       const fresh = await buildAndSetItems(tok, nodes, libIds);
-      const merged = mergeSaved(fresh, saved);
+      const merged = mergeSaved(fresh, saved, s);
       enrichImages(merged); // 画像なし作品をAniList→OGPの順で非同期補完
       // 手動追加アイテムの視聴状態もAnnictのライブラリと突合して更新
       for (const id in merged) {
@@ -880,7 +885,7 @@ function App() {
       const pi    = d?.searchWorks?.pageInfo ?? {};
       const fresh = await buildAndSetItems(token, nodes, libIds);
       // fetchMoreでは追加のsearchWorksのみ（extraNodesは初回fetchで取得済み）
-      const moreMerged = mergeSaved(fresh, loadSaved());
+      const moreMerged = mergeSaved(fresh, loadSaved(), season);
       enrichImages(moreMerged);
       setItems(prev => ({ ...prev, ...moreMerged }));
       setHasNextPage(pi.hasNextPage ?? false);
@@ -923,6 +928,7 @@ function App() {
       // Annict上のステータス（WATCHING/WATCHED）を視聴済みとして反映
       watched: w.viewerStatusState === "WATCHING" || w.viewerStatusState === "WATCHED",
       _manual: true,
+      addedSeason: season, // 追加時に開いていたクールタブ。他クールタブでは表示しない
     };
     // localStorageに即時書き込み（auto-saveのタイミングに依存しない）
     const existing = loadSaved();

@@ -354,6 +354,13 @@ function repRating(item) {
   const ratings = item?.ratings ?? [];
   return ratings.length > 0 ? (ratings[ratings.length - 1] ?? "") : "";
 }
+// 手動追加アイテムが「表示対象クール」として記録しているクール一覧を取得
+// 旧形式(addedSeason単数)からの移行にも対応。null = スコープ情報なし(旧データ)＝常に表示
+function getAddedSeasons(saved) {
+  if (Array.isArray(saved?.addedSeasons)) return saved.addedSeasons;
+  if (typeof saved?.addedSeason === "string") return [saved.addedSeason];
+  return null;
+}
 
 function mergeSaved(items, saved, currentSeason) {
   const next = {};
@@ -369,12 +376,12 @@ function mergeSaved(items, saved, currentSeason) {
     }
   }
   // APIにない手動追加アイテムをsavedから復元（idを保証）
-  // 追加時のクールを記録したアイテムは、そのクールを開いている時だけ復元する
+  // 追加時のクールを記録したアイテムは、そのクールのいずれかを開いている時だけ復元する
   // （記録がない旧データは互換のため常に復元＝従来通り全クールに表示）
   for (const id in saved) {
     if (saved[id]._manual && !next[id]) {
-      const addedSeason = saved[id].addedSeason;
-      if (addedSeason == null || addedSeason === currentSeason) {
+      const seasons = getAddedSeasons(saved[id]);
+      if (seasons == null || seasons.includes(currentSeason)) {
         next[id] = { ...saved[id], id, ...normalizeSlots(saved[id]) };
       }
     }
@@ -384,10 +391,10 @@ function mergeSaved(items, saved, currentSeason) {
 function extractSaveable(items) {
   const out = {};
   for (const id in items) {
-    const { ratings, comments, _manual, title, season, image, site, twitter, media, watched, addedSeason } = items[id];
+    const { ratings, comments, _manual, title, season, image, site, twitter, media, watched, addedSeasons } = items[id];
     if (_manual) {
       // 手動追加アイテムは作品情報ごと保存（idも含める）
-      out[id] = { id, ratings: ratings ?? [""], comments: comments ?? [""], _manual: true, addedSeason,
+      out[id] = { id, ratings: ratings ?? [""], comments: comments ?? [""], _manual: true, addedSeasons,
                   title, season, image, site, twitter, media, watched: watched === true };
     } else if (hasAnyRating(ratings) || hasAnyComment(comments)) {
       out[id] = { ratings, comments };
@@ -401,7 +408,8 @@ function extractSaveable(items) {
 
 function AnimeCard({ item, index, onChange }) {
   if (!item || !item.id) return null; // 不正なitemは描画しない
-  const [ci, setCi] = useState(0); // 選択中の感想/評価スロット
+  // 選択中の感想/評価スロット。初期表示は最新（末尾）のスロットを開く
+  const [ci, setCi] = useState(() => Math.max(0, ((item.comments && item.comments.length) || 1) - 1));
   const comments = (item.comments && item.comments.length > 0) ? item.comments : [""];
   const ratings  = (item.ratings  && item.ratings.length  > 0) ? item.ratings  : [""];
   const idx = Math.min(ci, comments.length - 1);
@@ -914,9 +922,18 @@ function App() {
   };
 
   // 手動追加: 作品をリストに追加（_manualフラグ付きで即時保存）
+  // 既に評価・感想が保存済みの作品（別クールで視聴中の続編など）を追加した場合は、
+  // 既存データを上書きせず新しい感想スロットを追加して次クール分を入力できるようにする
   const addWorkManually = (w) => {
     const id = String(w.annictId);
     if (items[id]) { showToast("既にリストにあります", "info"); return; }
+    const existing = loadSaved();
+    const prevSaved = existing[id];
+    const prevNorm = prevSaved ? normalizeSlots(prevSaved) : null;
+    const hasPrevData = !!prevNorm && (hasAnyRating(prevNorm.ratings) || hasAnyComment(prevNorm.comments));
+    const comments = hasPrevData ? [...prevNorm.comments, ""] : [""];
+    const ratings  = hasPrevData ? [...prevNorm.ratings, ""]  : [""];
+    const addedSeasons = Array.from(new Set([...(getAddedSeasons(prevSaved) ?? []), season]));
     const item = {
       id, title: w.title,
       season: w.seasonYear ? `${w.seasonYear}年${SEASON_NAMES[w.seasonName] ?? ""}` : "",
@@ -924,18 +941,17 @@ function App() {
       site: w.officialSiteUrl ?? null,
       twitter: w.twitterUsername ?? null,
       media: (w.media ?? "TV").toLowerCase(),
-      ratings: [""], comments: [""],
+      ratings, comments,
       // Annict上のステータス（WATCHING/WATCHED）を視聴済みとして反映
       watched: w.viewerStatusState === "WATCHING" || w.viewerStatusState === "WATCHED",
       _manual: true,
-      addedSeason: season, // 追加時に開いていたクールタブ。他クールタブでは表示しない
+      addedSeasons, // 追加時に開いていたクールタブの積み上げ。これらのクールタブでのみ表示
     };
     // localStorageに即時書き込み（auto-saveのタイミングに依存しない）
-    const existing = loadSaved();
-    existing[id] = { ratings: [""], comments: [""], _manual: true, ...item };
+    existing[id] = { ratings, comments, _manual: true, ...item };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(existing));
     setItems(prev => ({ ...prev, [id]: item }));
-    showToast(`「${w.title}」を追加しました`, "ok");
+    showToast(hasPrevData ? `「${w.title}」に新しいクールの感想タブを追加しました` : `「${w.title}」を追加しました`, "ok");
   };
 
   // ── 画像出力（複数ページ対応・感想メモ付き） ────────────────────────────

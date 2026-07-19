@@ -242,6 +242,15 @@ const CURRENT_SEASON = (() => {
   const { year, name } = currentSeason();
   return `${year}-${name}`;
 })();
+// クールキー("2024-spring")から感想タブ用の短いラベル("'24春")を作る
+const SEASON_KANJI = { spring:"春", summer:"夏", autumn:"秋", winter:"冬" };
+function shortSeasonLabel(seasonKey) {
+  if (!seasonKey) return null;
+  const [y, name] = seasonKey.split("-");
+  const kanji = SEASON_KANJI[name];
+  return (y && kanji) ? `'${y.slice(2)}${kanji}` : seasonKey;
+}
+const SEASON_FULL_LABEL = Object.fromEntries(SEASONS.map(s => [s.value, s.label]));
 
 async function gqlFetch(token, query, vars = {}) {
   const r = await fetch(GQL, {
@@ -314,7 +323,7 @@ function pickImage(image) {
   return image.recommendedImageUrl || null;
 }
 
-function workToItem(w, watched = false) {
+function workToItem(w, watched = false, homeSeason = null) {
   return {
     id: String(w.annictId), title: w.title,
     season: w.seasonYear ? `${w.seasonYear}年${SEASON_NAMES[w.seasonName] ?? ""}` : "",
@@ -322,7 +331,7 @@ function workToItem(w, watched = false) {
     site: w.officialSiteUrl ?? null,
     twitter: w.twitterUsername ?? null,
     media: (w.media ?? "TV").toLowerCase(),
-    ratings: [""], comments: [""], watched: watched === true,
+    ratings: [""], comments: [""], slotSeasons: [homeSeason], watched: watched === true,
   };
 }
 
@@ -331,7 +340,7 @@ function loadSaved() {
   catch { return {}; }
 }
 // 旧形式(comment: string / rating: string)を新形式(comments/ratings: string[])へ正規化
-// クールごとのスロットとして comments と ratings を同じ長さに揃える
+// クールごとのスロットとして comments・ratings・slotSeasons(各スロットが属するクール)を同じ長さに揃える
 function normalizeSlots(x) {
   const comments = Array.isArray(x?.comments) && x.comments.length > 0
     ? x.comments.slice()
@@ -341,7 +350,10 @@ function normalizeSlots(x) {
     : (typeof x?.rating === "string" && x.rating !== "" ? [x.rating] : [""]);
   while (ratings.length < comments.length) ratings.push("");
   ratings.length = comments.length;
-  return { comments, ratings };
+  const slotSeasons = Array.isArray(x?.slotSeasons) ? x.slotSeasons.slice() : [];
+  while (slotSeasons.length < comments.length) slotSeasons.push(null);
+  slotSeasons.length = comments.length;
+  return { comments, ratings, slotSeasons };
 }
 function hasAnyComment(comments) {
   return (comments ?? []).some(c => (c ?? "").trim() !== "");
@@ -391,13 +403,14 @@ function mergeSaved(items, saved, currentSeason) {
 function extractSaveable(items) {
   const out = {};
   for (const id in items) {
-    const { ratings, comments, _manual, title, season, image, site, twitter, media, watched, addedSeasons } = items[id];
+    const { ratings, comments, slotSeasons, _manual, title, season, image, site, twitter, media, watched, addedSeasons } = items[id];
     if (_manual) {
       // 手動追加アイテムは作品情報ごと保存（idも含める）
-      out[id] = { id, ratings: ratings ?? [""], comments: comments ?? [""], _manual: true, addedSeasons,
+      out[id] = { id, ratings: ratings ?? [""], comments: comments ?? [""], slotSeasons: slotSeasons ?? [null],
+                  _manual: true, addedSeasons,
                   title, season, image, site, twitter, media, watched: watched === true };
     } else if (hasAnyRating(ratings) || hasAnyComment(comments)) {
-      out[id] = { ratings, comments };
+      out[id] = { ratings, comments, slotSeasons };
     }
     // 評価も感想もない通常アイテムは保存しない（削除を効かせる）
   }
@@ -406,12 +419,17 @@ function extractSaveable(items) {
 
 // ── AnimeCard ──────────────────────────────────────────────────────────────
 
-function AnimeCard({ item, index, onChange }) {
+function AnimeCard({ item, index, onChange, currentSeason }) {
   if (!item || !item.id) return null; // 不正なitemは描画しない
-  // 選択中の感想/評価スロット。初期表示は最新（末尾）のスロットを開く
-  const [ci, setCi] = useState(() => Math.max(0, ((item.comments && item.comments.length) || 1) - 1));
   const comments = (item.comments && item.comments.length > 0) ? item.comments : [""];
   const ratings  = (item.ratings  && item.ratings.length  > 0) ? item.ratings  : [""];
+  const slotSeasons = (item.slotSeasons && item.slotSeasons.length === comments.length)
+    ? item.slotSeasons : comments.map(() => null);
+  // 選択中の感想/評価スロット。今開いているクールに紐付くスロットがあればそれを、無ければ最新（末尾）のスロットを開く
+  const [ci, setCi] = useState(() => {
+    const matchIdx = slotSeasons.indexOf(currentSeason);
+    return matchIdx !== -1 ? matchIdx : Math.max(0, comments.length - 1);
+  });
   const idx = Math.min(ci, comments.length - 1);
   const curRating = ratings[idx] ?? "";
   const ri = RATINGS.find(r => r.id === (repRating(item) || "")); // バッジは最新クールの評価を代表表示
@@ -473,11 +491,12 @@ function AnimeCard({ item, index, onChange }) {
           <span class="ctab-label">感想</span>
           ${comments.map((_, i) => html`
             <button key=${i} class=${`ctab${i === idx ? " active" : ""}`}
-              onClick=${() => setCi(i)}>${i + 1}</button>
+              title=${slotSeasons[i] ? (SEASON_FULL_LABEL[slotSeasons[i]] ?? slotSeasons[i]) : `感想 ${i + 1}`}
+              onClick=${() => setCi(i)}>${slotSeasons[i] ? shortSeasonLabel(slotSeasons[i]) : (i + 1)}</button>
           `)}
           <button class="ctab" title="感想スロットを追加（年間アニメのクール別感想・評価などに）"
             onClick=${() => {
-              onChange({ comments: [...comments, ""], ratings: [...ratings, ""] });
+              onChange({ comments: [...comments, ""], ratings: [...ratings, ""], slotSeasons: [...slotSeasons, currentSeason] });
               setCi(comments.length);
             }}>＋</button>
           ${comments.length > 1 && html`
@@ -485,12 +504,14 @@ function AnimeCard({ item, index, onChange }) {
               onClick=${() => {
                 const nextComments = comments.filter((_, i) => i !== idx);
                 const nextRatings  = ratings.filter((_, i) => i !== idx);
-                onChange({ comments: nextComments, ratings: nextRatings });
+                const nextSlotSeasons = slotSeasons.filter((_, i) => i !== idx);
+                onChange({ comments: nextComments, ratings: nextRatings, slotSeasons: nextSlotSeasons });
                 setCi(Math.max(0, idx - 1));
               }}>✕</button>
           `}
         </div>
-        <textarea class="comment-area" placeholder=${comments.length > 1 ? `感想 ${idx + 1}…` : "感想・メモ…"}
+        <textarea class="comment-area"
+          placeholder=${slotSeasons[idx] ? `感想（${SEASON_FULL_LABEL[slotSeasons[idx]] ?? slotSeasons[idx]}）…` : (comments.length > 1 ? `感想 ${idx + 1}…` : "感想・メモ…")}
           value=${comments[idx] ?? ""}
           onChange=${e => setComment(e.target.value)}>
         </textarea>
@@ -785,14 +806,14 @@ function App() {
   };
 
   // 共通: GraphQLレスポンスからアイテムをビルドしてlocalStorageとマージ
-  const buildAndSetItems = async (tok, nodes, libIds, prevItems = {}) => {
+  const buildAndSetItems = async (tok, nodes, libIds, prevItems = {}, seasonKey = null) => {
     const seasonWorkIds = new Set(nodes.map(w => String(w.annictId)));
     // libIdsに含まれるもの全てを視聴済みとする（交差を取らない）
     const watchedIds = libIds;
     const fresh = { ...prevItems };
     nodes.forEach(w => {
       const id = String(w.annictId);
-      if (!fresh[id]) fresh[id] = workToItem(w, watchedIds.has(id));
+      if (!fresh[id]) fresh[id] = workToItem(w, watchedIds.has(id), seasonKey);
       else fresh[id] = { ...fresh[id], watched: fresh[id].watched || watchedIds.has(id) };
     });
     // 画像がない作品をREST APIで補完（per_page上限50に合わせて50件ずつ分割）
@@ -861,7 +882,7 @@ function App() {
       const nodes = d?.searchWorks?.nodes ?? [];
       const pi    = d?.searchWorks?.pageInfo ?? {};
       const saved = loadSaved();
-      const fresh = await buildAndSetItems(tok, nodes, libIds);
+      const fresh = await buildAndSetItems(tok, nodes, libIds, {}, s);
       const merged = mergeSaved(fresh, saved, s);
       enrichImages(merged); // 画像なし作品をAniList→OGPの順で非同期補完
       // 手動追加アイテムの視聴状態もAnnictのライブラリと突合して更新
@@ -891,7 +912,7 @@ function App() {
       );
       const nodes = d?.searchWorks?.nodes ?? [];
       const pi    = d?.searchWorks?.pageInfo ?? {};
-      const fresh = await buildAndSetItems(token, nodes, libIds);
+      const fresh = await buildAndSetItems(token, nodes, libIds, {}, season);
       // fetchMoreでは追加のsearchWorksのみ（extraNodesは初回fetchで取得済み）
       const moreMerged = mergeSaved(fresh, loadSaved(), season);
       enrichImages(moreMerged);
@@ -933,6 +954,8 @@ function App() {
     const hasPrevData = !!prevNorm && (hasAnyRating(prevNorm.ratings) || hasAnyComment(prevNorm.comments));
     const comments = hasPrevData ? [...prevNorm.comments, ""] : [""];
     const ratings  = hasPrevData ? [...prevNorm.ratings, ""]  : [""];
+    // 新スロットは今開いているクールタブに紐付ける（そのクールを開いた時にデフォルトで表示される）
+    const slotSeasons = hasPrevData ? [...prevNorm.slotSeasons, season] : [season];
     const addedSeasons = Array.from(new Set([...(getAddedSeasons(prevSaved) ?? []), season]));
     const item = {
       id, title: w.title,
@@ -941,14 +964,14 @@ function App() {
       site: w.officialSiteUrl ?? null,
       twitter: w.twitterUsername ?? null,
       media: (w.media ?? "TV").toLowerCase(),
-      ratings, comments,
+      ratings, comments, slotSeasons,
       // Annict上のステータス（WATCHING/WATCHED）を視聴済みとして反映
       watched: w.viewerStatusState === "WATCHING" || w.viewerStatusState === "WATCHED",
       _manual: true,
       addedSeasons, // 追加時に開いていたクールタブの積み上げ。これらのクールタブでのみ表示
     };
     // localStorageに即時書き込み（auto-saveのタイミングに依存しない）
-    existing[id] = { ratings, comments, _manual: true, ...item };
+    existing[id] = { ratings, comments, slotSeasons, _manual: true, ...item };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(existing));
     setItems(prev => ({ ...prev, [id]: item }));
     showToast(hasPrevData ? `「${w.title}」に新しいクールの感想タブを追加しました` : `「${w.title}」を追加しました`, "ok");
@@ -1410,9 +1433,9 @@ function App() {
               for (const id in saved) {
                 if (saved[id]._manual) {
                   // 評価・感想があれば通常アイテムとして残す
-                  const { comments: cms, ratings: rts } = normalizeSlots(saved[id]);
+                  const { comments: cms, ratings: rts, slotSeasons: sls } = normalizeSlots(saved[id]);
                   if (hasAnyRating(rts) || hasAnyComment(cms)) {
-                    cleaned[id] = { ratings: rts, comments: cms };
+                    cleaned[id] = { ratings: rts, comments: cms, slotSeasons: sls };
                   }
                 } else {
                   cleaned[id] = saved[id];
@@ -1550,7 +1573,7 @@ function App() {
               <p>表示できる作品がありません。<br/>上の「再読込」から読み込んでください。</p>
             </div>`}
           ${!loading && visible.map((item, i) => html`
-            <${AnimeCard} key=${item.id} item=${item} index=${i}
+            <${AnimeCard} key=${item.id} item=${item} index=${i} currentSeason=${season}
               onChange=${patch => updateItem(item.id, patch)} />
           `)}
         </div>

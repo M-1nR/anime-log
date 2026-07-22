@@ -403,14 +403,14 @@ function mergeSaved(items, saved, currentSeason) {
 function extractSaveable(items) {
   const out = {};
   for (const id in items) {
-    const { ratings, comments, slotSeasons, _manual, title, season, image, site, twitter, media, watched, addedSeasons } = items[id];
+    const { ratings, comments, slotSeasons, _manual, title, season, image, site, twitter, media, watched, addedSeasons, updatedAt } = items[id];
     if (_manual) {
       // 手動追加アイテムは作品情報ごと保存（idも含める）
       out[id] = { id, ratings: ratings ?? [""], comments: comments ?? [""], slotSeasons: slotSeasons ?? [null],
-                  _manual: true, addedSeasons,
+                  _manual: true, addedSeasons, updatedAt,
                   title, season, image, site, twitter, media, watched: watched === true };
     } else if (hasAnyRating(ratings) || hasAnyComment(comments)) {
-      out[id] = { ratings, comments, slotSeasons };
+      out[id] = { ratings, comments, slotSeasons, updatedAt };
     }
     // 評価も感想もない通常アイテムは保存しない（削除を効かせる）
   }
@@ -747,7 +747,10 @@ function App() {
     if (tokenRef.current) {
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => {
-        serverSave(tokenRef.current, next);
+        serverSave(tokenRef.current, next).then(ok => {
+          // 失敗に気づけないと次回ログイン時に古いサーバーデータで上書きされうるため通知する
+          if (!ok) showToast("サーバーへの保存に失敗しました（この端末には保存済み）", "err");
+        });
       }, 2000);
     }
   }, [items]);
@@ -781,11 +784,16 @@ function App() {
       localStorage.setItem(TOKEN_KEY, tok);
       if (!silent) showToast(`${d.viewer.name} さん、ようこそ！`, "ok");
       // サーバーから保存データを読み込み、localStorageとマージ
+      // 双方に同じ作品のデータがある場合は updatedAt が新しい方を採用する
+      // （タイムスタンプが無い旧データ同士はローカルを優先＝直近の編集がサーバー未同期でも消えないようにする）
       const serverData = await serverLoad(tok);
       if (serverData && Object.keys(serverData).length > 0) {
         const local = loadSaved();
-        // サーバー側を優先しつつ、ローカルにしかないキーは残す
-        const merged = { ...local, ...serverData };
+        const merged = { ...serverData };
+        for (const id in local) {
+          const l = local[id], s = serverData[id];
+          merged[id] = (!s || (l?.updatedAt ?? 0) >= (s?.updatedAt ?? 0)) ? l : s;
+        }
         localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
         if (!silent) showToast("サーバーからデータを同期しました", "ok");
       }
@@ -928,8 +936,9 @@ function App() {
     if (token) { setItems({}); fetchSeason(token, season); }
   }, [token, season]);
 
+  // updatedAtはユーザー操作による更新時刻。サーバー同期時にどちらのデータが新しいか判定するために使う
   const updateItem = (id, patch) =>
-    setItems(prev => ({ ...prev, [id]: { ...prev[id], ...patch } }));
+    setItems(prev => ({ ...prev, [id]: { ...prev[id], ...patch, updatedAt: Date.now() } }));
 
   // 手動追加: タイトル検索
   const doAddSearch = async () => {
@@ -969,6 +978,7 @@ function App() {
       watched: w.viewerStatusState === "WATCHING" || w.viewerStatusState === "WATCHED",
       _manual: true,
       addedSeasons, // 追加時に開いていたクールタブの積み上げ。これらのクールタブでのみ表示
+      updatedAt: Date.now(),
     };
     // localStorageに即時書き込み（auto-saveのタイミングに依存しない）
     existing[id] = { ratings, comments, slotSeasons, _manual: true, ...item };
